@@ -1,6 +1,6 @@
 #pragma once
 
-#include "UploadBuffer.h"
+#include <UploadBuffer.h>
 
 struct ObjectConstants {
     DirectX::XMFLOAT4X4 WorldViewProj;

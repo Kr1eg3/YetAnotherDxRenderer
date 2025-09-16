@@ -1,6 +1,6 @@
 #pragma once
 
-#include "UploadBuffer.h"
+#include <UploadBuffer.h>
 
 struct MaterialConstants {
     DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };

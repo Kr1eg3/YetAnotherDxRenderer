@@ -33,7 +33,7 @@ Graphics::Graphics(Window* wnd)
 	// Creation of command queue, command allocator and command list
 	CreateCommandObjects();
 
-	CreateSwapChain(wnd);
+	CreateSwapChain();
 
 	// Create rtv and dsv descriptor heaps
 	CreateRTVandDSVdescHeaps();
@@ -49,8 +49,10 @@ Graphics::Graphics(Window* wnd)
 	*   SceneManager which manages multiple scenes. Each scene should create it's own
 	*   resources, PSOs, descriptor heaps etc.
 	*/
+
 	// Build frame resources first
 	BuildFrameResources();
+
 	// Build the descriptor heaps for the scene.
     D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
     cbvHeapDesc.NumDescriptors = 2; // 1 CBV + 1 SRV for texture
@@ -185,12 +187,15 @@ void Graphics::CreateRTVandDSVdescHeaps() {
 		&dsvHeapDesc, IID_PPV_ARGS(m_dsvHeap.GetAddressOf())), __FUNCTION__);
 }
 
-void Graphics::CreateSwapChain(Window* wnd) {
+void Graphics::CreateSwapChain() {
+	assert(m_window && "Window is null");
+	HWND hWnd = static_cast<HWND>(m_window->GetNativeHandle());
+	assert(hWnd && "HWND is null");
 	m_swapChain.Reset();
 
 	DXGI_SWAP_CHAIN_DESC sd;
-	sd.BufferDesc.Width = wnd->GetWidth();
-	sd.BufferDesc.Height = wnd->GetHeight();
+	sd.BufferDesc.Width = m_window->GetWidth();
+	sd.BufferDesc.Height = m_window->GetHeight();
 	sd.BufferDesc.RefreshRate.Numerator = 60;
 	sd.BufferDesc.RefreshRate.Denominator = 1;
 	sd.BufferDesc.Format = m_backBufferFormat;
@@ -200,7 +205,7 @@ void Graphics::CreateSwapChain(Window* wnd) {
 	sd.SampleDesc.Quality = m_4xMsaaState ? (m_4xMsaaQuality - 1) : 0;
 	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	sd.BufferCount = m_swapChainBufferCount;
-	sd.OutputWindow = static_cast<HWND>(wnd->GetNativeHandle());
+	sd.OutputWindow = hWnd;
 	sd.Windowed = true;
 	sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
@@ -356,15 +361,6 @@ void Graphics::Update(float32 deltaTime) {
 
 		m_currFrameResource->PassCB->CopyData(0, passConstants);
 	}
-
-	// Legacy system - commented out
-	/*
-    DirectX::XMMATRIX world = XMLoadFloat4x4(&mWorld);
-    DirectX::XMMATRIX worldViewProj = world*view*proj;
-	ObjectConstants objConstants;
-    XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
-    m_objectCB->CopyData(0, objConstants);
-	*/
 }
 
 void Graphics::UpdateCamera(float32 deltaTime) {
@@ -584,77 +580,6 @@ D3D12_CPU_DESCRIPTOR_HANDLE Graphics::CurrentBackBufferView() const {
 		m_rtvHeap->GetCPUDescriptorHandleForHeapStart(),
 		m_currBackBuffer,
 		m_rtvDescriptorSize);
-}
-
-void Graphics::BuildBoxGeometry() {
-    std::array<LegacyVertex, 8> vertices =
-    {
-        LegacyVertex({ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(DirectX::Colors::White) }),
-		LegacyVertex({ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(DirectX::Colors::Black) }),
-		LegacyVertex({ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(DirectX::Colors::Red) }),
-		LegacyVertex({ DirectX::XMFLOAT3(+1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(DirectX::Colors::Green) }),
-		LegacyVertex({ DirectX::XMFLOAT3(-1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(DirectX::Colors::Blue) }),
-		LegacyVertex({ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(DirectX::Colors::Yellow) }),
-		LegacyVertex({ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(DirectX::Colors::Cyan) }),
-		LegacyVertex({ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(DirectX::Colors::Magenta) })
-    };
-
-	std::array<std::uint16_t, 36> indices =
-	{
-		// front face
-		0, 1, 2,
-		0, 2, 3,
-
-		// back face
-		4, 6, 5,
-		4, 7, 6,
-
-		// left face
-		4, 5, 1,
-		4, 1, 0,
-
-		// right face
-		3, 2, 6,
-		3, 6, 7,
-
-		// top face
-		1, 5, 6,
-		1, 6, 2,
-
-		// bottom face
-		4, 0, 3,
-		4, 3, 7
-	};
-
-    const UINT vbByteSize = (UINT)vertices.size() * sizeof(LegacyVertex);
-	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-
-	m_boxGeo = std::make_unique<MeshGeometry>();
-	m_boxGeo->Name = "boxGeo";
-
-	ThrowIfFailed(D3DCreateBlob(vbByteSize, &m_boxGeo->VertexBufferCPU));
-	CopyMemory(m_boxGeo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
-
-	ThrowIfFailed(D3DCreateBlob(ibByteSize, &m_boxGeo->IndexBufferCPU));
-	CopyMemory(m_boxGeo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
-
-	m_boxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(m_device.Get(),
-		m_commandList.Get(), vertices.data(), vbByteSize, m_boxGeo->VertexBufferUploader);
-
-	m_boxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(m_device.Get(),
-		m_commandList.Get(), indices.data(), ibByteSize, m_boxGeo->IndexBufferUploader);
-
-	m_boxGeo->VertexByteStride = sizeof(LegacyVertex);
-	m_boxGeo->VertexBufferByteSize = vbByteSize;
-	m_boxGeo->IndexFormat = DXGI_FORMAT_R16_UINT;
-	m_boxGeo->IndexBufferByteSize = ibByteSize;
-
-	SubmeshGeometry submesh;
-	submesh.IndexCount = (UINT)indices.size();
-	submesh.StartIndexLocation = 0;
-	submesh.BaseVertexLocation = 0;
-
-	m_boxGeo->DrawArgs["box"] = submesh;
 }
 
 void Graphics::OnMouseDown(MouseButton button, int32 x, int32 y) {

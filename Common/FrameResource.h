@@ -1,9 +1,8 @@
 #pragma once
 
 #include <WindowsPlatform.h>
-#include "UploadBuffer.h"
-#include "RenderComponents.h"
-#include "RenderObject.h"
+#include <RenderComponents.h>
+#include <RenderObject.h>
 
 // Forward declarations
 struct MaterialConstants; // Already defined in RenderComponents.h

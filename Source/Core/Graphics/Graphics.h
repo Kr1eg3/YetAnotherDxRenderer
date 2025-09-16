@@ -1,12 +1,10 @@
 #pragma once
 
 #include <UploadBuffer.h>
-#include "../../Core/Window/Window.h"
 #include "../../Platform/Windows/Win32Window.h"
 #include <DirectXMath.h> // in Math helper?
 #include <ResourceManager.h>
 #include <StaticMesh.h>
-#include <RenderObject.h>
 #include <FrameResource.h>
 
 static DirectX::XMFLOAT4X4 Identity4x4() {
@@ -15,22 +13,12 @@ static DirectX::XMFLOAT4X4 Identity4x4() {
 		0.0f, 1.0f, 0.0f, 0.0f,
 		0.0f, 0.0f, 1.0f, 0.0f,
 		0.0f, 0.0f, 0.0f, 1.0f);
-
 	return I;
 }
-
-// Legacy vertex structure for old code
-struct LegacyVertex {
-    DirectX::XMFLOAT3 Pos;
-    DirectX::XMFLOAT4 Color;
-};
 
 class Graphics {
 public:
     Graphics(Window* wnd);
-    void CacheDescSizes();
-    void CreateRTVandDSVdescHeaps();
-    void CreateSwapChain(Window* wnd);
     ~Graphics() = default;
 
     Graphics(const Graphics&) = delete;
@@ -50,6 +38,9 @@ public:
 	void OnResize();
 private:
     void CreateDevice();
+    void CacheDescSizes();
+    void CreateSwapChain();
+    void CreateRTVandDSVdescHeaps();
     void CheckMSAAqual();
     void EnableDebugLayer();
 	void FlushCommandQueue();
@@ -59,7 +50,6 @@ private:
 	D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView() const;
     D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView() const;
 
-	void BuildBoxGeometry();
     void BuildPSOs();
 	void BuildDefaultPSO();
 	void BuildWireframePSO();

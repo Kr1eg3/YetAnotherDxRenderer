@@ -113,6 +113,41 @@ private:
     int m_line;
 };
 
+static DirectX::XMFLOAT4X4 Identity4x4() {
+	static DirectX::XMFLOAT4X4 I(
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f);
+	return I;
+}
+
+struct Vertex {
+    DirectX::XMFLOAT3 Pos;
+    DirectX::XMFLOAT3 Normal;
+    DirectX::XMFLOAT2 TexCoord;
+};
+
+struct MeshData {
+	std::vector<Vertex> Vertices;
+	std::vector<uint32> Indices32;
+
+	std::vector<uint16>& GetIndices16() {
+		if (mIndices16.empty()) {
+			mIndices16.resize(Indices32.size());
+            for (size_t i = 0; i < Indices32.size(); ++i) {
+				mIndices16[i] = static_cast<uint16>(Indices32[i]);
+            }
+		}
+
+		return mIndices16;
+	}
+
+private:
+	std::vector<uint16> mIndices16;
+};
+
+
 class d3dUtil {
 public:
 
@@ -152,11 +187,11 @@ public:
 		const std::string& target);
 };
 
-// Defines a subrange of geometry in a MeshGeometry.  This is for when multiple
+// Defines a subrange of geometry in a GeometryAltas.  This is for when multiple
 // geometries are stored in one vertex and index buffer.  It provides the offsets
 // and data needed to draw a subset of geometry stores in the vertex and index
 // buffers so that we can implement the technique described by Figure 6.3.
-struct SubmeshGeometry {
+struct MeshRegion {
 	UINT IndexCount = 0;
 	UINT StartIndexLocation = 0;
 	INT BaseVertexLocation = 0;
@@ -166,7 +201,7 @@ struct SubmeshGeometry {
 	DirectX::BoundingBox Bounds;
 };
 
-struct MeshGeometry {
+struct GeometryAltas {
 	// Give it a name so we can look it up by name.
 	std::string Name;
 
@@ -187,10 +222,10 @@ struct MeshGeometry {
 	DXGI_FORMAT IndexFormat = DXGI_FORMAT_R16_UINT;
 	UINT IndexBufferByteSize = 0;
 
-	// A MeshGeometry may store multiple geometries in one vertex/index buffer.
+	// A GeometryAltas may store multiple geometries in one vertex/index buffer.
 	// Use this container to define the Submesh geometries so we can draw
 	// the Submeshes individually.
-	HashMap<std::string, SubmeshGeometry> DrawArgs;
+	HashMap<std::string, MeshRegion> GeoRegionsMap;
 
 	D3D12_VERTEX_BUFFER_VIEW VertexBufferView() const {
 		D3D12_VERTEX_BUFFER_VIEW vbv;
@@ -225,6 +260,92 @@ struct Texture {
 
     ComPtr<ID3D12Resource> resource = nullptr;
     ComPtr<ID3D12Resource> uploadHeap = nullptr;
+};
+
+// Texture Atlas - manages all textures and their SRV descriptors
+struct TextureAtlas {
+    String Name;
+
+    // Map of texture names to textures
+    HashMap<String, SharedPtr<Texture>> Textures;
+
+    // Map of texture names to their SRV descriptor indices
+    HashMap<String, uint32> TextureIndices;
+
+    // Descriptor heap for all SRVs
+    ComPtr<ID3D12DescriptorHeap> SrvDescriptorHeap;
+
+    // Current number of textures in the atlas
+    uint32 TextureCount = 0;
+
+    // Maximum number of textures the atlas can hold
+    uint32 MaxTextures = 64;
+
+    // Descriptor increment size
+    UINT DescriptorSize = 0;
+
+    // Initialize the descriptor heap
+    void InitializeDescriptorHeap(ID3D12Device* device, UINT txtCount) {
+        D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+        srvHeapDesc.NumDescriptors = txtCount;
+        srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&SrvDescriptorHeap));
+
+        DescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
+
+    // Add texture to atlas and create SRV
+    uint32 AddTexture(ID3D12Device* device, const String& name, SharedPtr<Texture> texture) {
+        if (TextureCount >= MaxTextures || !SrvDescriptorHeap) {
+            return UINT32_MAX; // Atlas full or not initialized
+        }
+
+        // Store texture
+        Textures[name] = texture;
+        uint32 index = TextureCount;
+        TextureIndices[name] = index;
+
+        // Create SRV descriptor
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+        if (index > 0) {
+            srvHandle.Offset(1, DescriptorSize);
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = texture->resource->GetDesc().Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = texture->resource->GetDesc().MipLevels;
+
+        device->CreateShaderResourceView(texture->resource.Get(), &srvDesc, srvHandle);
+
+        TextureCount++;
+        return index;
+    }
+
+    // Get texture index by name
+    int GetTextureIndex(const String& name) const {
+        auto it = TextureIndices.find(name);
+        return (it != TextureIndices.end()) ? static_cast<int>(it->second) : -1;
+    }
+
+    // Get GPU descriptor handle for a specific texture
+    D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(uint32 index) const {
+        CD3DX12_GPU_DESCRIPTOR_HANDLE handle(SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+        handle.Offset(index, DescriptorSize);
+        return handle;
+    }
+
+    // Cleanup upload heaps after GPU upload
+    void DisposeUploaders() {
+        for (auto& [name, texture] : Textures) {
+            if (texture && texture->uploadHeap) {
+                texture->uploadHeap = nullptr;
+            }
+        }
+    }
 };
 
 // Error checking macros

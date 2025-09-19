@@ -7,7 +7,7 @@ struct MaterialConstants {
     DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
     float Roughness = 0.25f;
 
-    DirectX::XMFLOAT4X4 MatTransform;
+    DirectX::XMFLOAT4X4 MatTransform = Identity4x4();
 };
 
 class IMeshComponent {
@@ -15,9 +15,9 @@ public:
     virtual ~IMeshComponent() = default;
 
     virtual void BindGeometry(ID3D12GraphicsCommandList* cmdList) = 0;
-    virtual const SubmeshGeometry& GetSubmesh(const String& name) const = 0;
+    virtual const MeshRegion& GetSubmesh(const String& name) const = 0;
     virtual bool HasSubmesh(const String& name) const = 0;
-    virtual const MeshGeometry* GetMeshData() const = 0;
+    virtual const GeometryAltas* GetMeshData() const = 0;
 };
 
 class IMaterialComponent {
@@ -35,6 +35,21 @@ public:
     virtual void SetMaterialConstants(const MaterialConstants& constants) = 0;
 };
 
+class IMaterial {
+public:
+  virtual ~IMaterial() = default;
+
+  virtual void Bind(ID3D12GraphicsCommandList* cmdList, UINT rootIndex) = 0;
+  virtual void UpdateConstants() = 0;
+
+  virtual bool IsTransparent() const = 0;
+  virtual bool RequiresAlphaTest() const = 0;
+  virtual int GetRenderQueue() const = 0;
+
+  virtual const MaterialConstants& GetConstants() const = 0;
+  virtual ID3D12PipelineState* GetPSO() const = 0;
+};
+
 class ITextureComponent {
 public:
     virtual ~ITextureComponent() = default;
@@ -47,7 +62,7 @@ public:
 
 class BasicMeshComponent : public IMeshComponent {
 public:
-    BasicMeshComponent(SharedPtr<MeshGeometry> mesh) : m_mesh(mesh) {}
+    BasicMeshComponent(SharedPtr<GeometryAltas> mesh) : m_mesh(mesh) {}
 
     void BindGeometry(ID3D12GraphicsCommandList* cmdList) override {
         if (!m_mesh) return;
@@ -59,24 +74,24 @@ public:
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     }
 
-    const SubmeshGeometry& GetSubmesh(const String& name) const override {
-        static SubmeshGeometry empty;
+    const MeshRegion& GetSubmesh(const String& name) const override {
+        static MeshRegion empty;
         if (!m_mesh) return empty;
 
-        auto it = m_mesh->DrawArgs.find(name);
-        return (it != m_mesh->DrawArgs.end()) ? it->second : empty;
+        auto it = m_mesh->GeoRegionsMap.find(name);
+        return (it != m_mesh->GeoRegionsMap.end()) ? it->second : empty;
     }
 
     bool HasSubmesh(const String& name) const override {
-        return m_mesh && m_mesh->DrawArgs.find(name) != m_mesh->DrawArgs.end();
+        return m_mesh && m_mesh->GeoRegionsMap.find(name) != m_mesh->GeoRegionsMap.end();
     }
 
-    const MeshGeometry* GetMeshData() const override {
+    const GeometryAltas* GetMeshData() const override {
         return m_mesh.get();
     }
 
 private:
-    SharedPtr<MeshGeometry> m_mesh;
+    SharedPtr<GeometryAltas> m_mesh;
 };
 
 class BasicMaterialComponent : public IMaterialComponent {

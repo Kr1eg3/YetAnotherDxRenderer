@@ -62,8 +62,67 @@ Graphics::Graphics(Window* wnd)
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvHeapDesc,
         IID_PPV_ARGS(&m_cbvHeap)));
 
-	// Create root signature
-	//
+	LoadTextures();
+
+	BuildRootSignature();
+
+	// Initialize ResourceManager
+	m_resourceManager = UniquePtr<ResourceManager>(
+		new ResourceManager(m_device.Get(), m_commandList.Get()));
+
+	// Use the texture atlas descriptor heap from ResourceManager
+	// instead of creating our own
+
+	// Build shaders and input layout
+	BuildShadersAndInputLayout();
+
+	// The ResourceManager now creates the atlas in its constructor
+	// Just get the mesh component from the atlas
+	auto meshComponent = m_resourceManager->CreateMeshComponent("box");
+	auto materialComponent = m_resourceManager->CreateMaterial("default");
+
+	m_boxObject = UniquePtr<StaticMesh>(new StaticMesh(meshComponent, materialComponent, "box"));
+	// Don't initialize constant buffer here - we'll use frame resources
+	// Each frame resource has its own constant buffers
+
+	// Create descriptor for the frame resource constant buffer
+	// We'll bind the appropriate one during rendering
+	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+
+	// Create CBV for the first frame resource as initial setup
+	if (m_frameResources.size() > 0 && m_frameResources[0]->ObjectCB) {
+		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_frameResources[0]->ObjectCB->Resource()->GetGPUVirtualAddress();
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+		cbvDesc.BufferLocation = cbAddress;
+		cbvDesc.SizeInBytes = objCBByteSize;
+
+		m_device->CreateConstantBufferView(
+			&cbvDesc,
+			m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
+	}
+
+	BuildPSOs();
+
+    // Execute the initialization commands.
+    ThrowIfFailed(m_commandList->Close());
+	ID3D12CommandList* cmdsLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+
+    // Wait until initialization is complete.
+    FlushCommandQueue();
+}
+
+void Graphics::BuildShadersAndInputLayout() {
+	m_vsByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "VS", "vs_5_0");
+	m_psByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "PS", "ps_5_0");
+	m_inputLayout = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+}
+
+void Graphics::BuildRootSignature() {
 	// Shader programs typically require resources as input (constant buffers,
 	// textures, samplers).  The root signature defines the resources the shader
 	// programs expect.  If we think of the shader programs as a function, and
@@ -107,58 +166,6 @@ Graphics::Graphics(Window* wnd)
 		serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(),
 		IID_PPV_ARGS(&m_rootSignature)));
-
-	// Initialize ResourceManager
-	m_resourceManager = UniquePtr<ResourceManager>(new ResourceManager(m_device.Get(), m_commandList.Get()));
-
-	// Build shaders and input layout
-	m_vsByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "VS", "vs_5_0");
-	m_psByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "PS", "ps_5_0");
-    m_inputLayout = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-    };
-
-	//Load Textures
-	LoadTextures();
-
-	// Create box mesh with ResourceManager
-	auto boxMesh = m_resourceManager->CreateBoxMesh("box", 2.0f, 2.0f, 2.0f);
-
-	BuildPSOs();
-
-	// Create render object
-	auto meshComponent = m_resourceManager->CreateMeshComponent("box");
-	auto materialComponent = m_resourceManager->CreateMaterial("default");
-
-	m_boxObject = UniquePtr<StaticMesh>(new StaticMesh(meshComponent, materialComponent, "box"));
-	// Don't initialize constant buffer here - we'll use frame resources
-	// Each frame resource has its own constant buffers
-
-	// Create descriptor for the frame resource constant buffer
-	// We'll bind the appropriate one during rendering
-	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-
-	// Create CBV for the first frame resource as initial setup
-	if (m_frameResources.size() > 0 && m_frameResources[0]->ObjectCB) {
-		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_frameResources[0]->ObjectCB->Resource()->GetGPUVirtualAddress();
-		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-		cbvDesc.BufferLocation = cbAddress;
-		cbvDesc.SizeInBytes = objCBByteSize;
-
-		m_device->CreateConstantBufferView(
-			&cbvDesc,
-			m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
-	}
-
-    // Execute the initialization commands.
-    ThrowIfFailed(m_commandList->Close());
-	ID3D12CommandList* cmdsLists[] = { m_commandList.Get() };
-	m_commandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-
-    // Wait until initialization is complete.
-    FlushCommandQueue();
 }
 
 void Graphics::CacheDescSizes() {
@@ -407,8 +414,12 @@ void Graphics::DrawFrame() {
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = DepthStencilView();
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
 
-	ID3D12DescriptorHeap* descriptorHeaps[] = { m_cbvHeap.Get() };
-	m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	// Use texture atlas descriptor heap from ResourceManager
+	auto textureAtlas = m_resourceManager->GetTextureAtlas();
+	if (textureAtlas && textureAtlas->SrvDescriptorHeap) {
+		ID3D12DescriptorHeap* descriptorHeaps[] = { textureAtlas->SrvDescriptorHeap.Get() };
+		m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	}
 
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
@@ -424,13 +435,18 @@ void Graphics::DrawFrame() {
 		cbvDesc.SizeInBytes = objCBByteSize;
 		m_device->CreateConstantBufferView(&cbvDesc, m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
 
-		// Bind the descriptor table for constant buffer
+		// Bind the CBV descriptor table (slot 0)
 		m_commandList->SetGraphicsRootDescriptorTable(0, m_cbvHeap->GetGPUDescriptorHandleForHeapStart());
 
-		// Bind the descriptor table for texture SRV
-		CD3DX12_GPU_DESCRIPTOR_HANDLE tex(m_cbvHeap->GetGPUDescriptorHandleForHeapStart());
-		tex.Offset(1, m_cbvSrvUavDescriptorSize);
-		m_commandList->SetGraphicsRootDescriptorTable(1, tex);
+		// Bind the texture SRV descriptor table (slot 1) from ResourceManager's texture atlas
+		if (textureAtlas) {
+			// Get texture index for "woodCrate" texture
+			int textureIndex = m_resourceManager->GetTextureIndex("woodCrate");
+			if (textureIndex >= 0) {
+				auto texHandle = textureAtlas->GetGPUHandle(static_cast<uint32>(textureIndex));
+				m_commandList->SetGraphicsRootDescriptorTable(1, texHandle);
+			}
+		}
 
 		m_boxObject->Render(m_commandList.Get());
 	}
@@ -693,6 +709,10 @@ void Graphics::BuildWireframePSO() {
 	m_resourceManager->AddPSO("wireframe", m_wireframePSO);
 }
 
+void Graphics::BuildGeoAtlas() {
+
+}
+
 void Graphics::BuildPSOs() {
 	BuildDefaultPSO();
 	BuildWireframePSO();
@@ -710,27 +730,8 @@ void Graphics::BuildFrameResources() {
 }
 
 void Graphics::LoadTextures() {
-	auto woodCrateTex = std::make_unique<Texture>();
-	woodCrateTex->name = "woodCrateTex";
-	woodCrateTex->filename = L"Textures/WoodCrate01.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(m_device.Get(),
-		m_commandList.Get(), woodCrateTex->filename.c_str(),
-		woodCrateTex->resource, woodCrateTex->uploadHeap));
-
-	m_textures[woodCrateTex->name] = std::move(woodCrateTex);
-
-	// Create SRV for the texture
-	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
-	hDescriptor.Offset(1, m_cbvSrvUavDescriptorSize); // Offset by 1 to skip CBV
-
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = m_textures["woodCrateTex"]->resource->GetDesc().Format;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Texture2D.MostDetailedMip = 0;
-	srvDesc.Texture2D.MipLevels = m_textures["woodCrateTex"]->resource->GetDesc().MipLevels;
-
-	m_device->CreateShaderResourceView(m_textures["woodCrateTex"]->resource.Get(), &srvDesc, hDescriptor);
+	// Textures are now loaded by ResourceManager in InitializeTextureAtlas()
+	// No need to load them here anymore
 }
 
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {

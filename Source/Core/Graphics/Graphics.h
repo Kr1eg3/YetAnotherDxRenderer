@@ -7,14 +7,6 @@
 #include <StaticMesh.h>
 #include <FrameResource.h>
 
-static DirectX::XMFLOAT4X4 Identity4x4() {
-	static DirectX::XMFLOAT4X4 I(
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 1.0f, 0.0f,
-		0.0f, 0.0f, 0.0f, 1.0f);
-	return I;
-}
 
 class Graphics {
 public:
@@ -50,9 +42,13 @@ private:
 	D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView() const;
     D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView() const;
 
+    // Need to store this functions in Sceen class later
+	void BuildGeoAtlas();
     void BuildPSOs();
 	void BuildDefaultPSO();
 	void BuildWireframePSO();
+    void BuildShadersAndInputLayout();
+    void BuildRootSignature();
 	void BuildFrameResources();
 
     // Textures
@@ -74,7 +70,7 @@ private:
 
 	// Legacy - will be removed after full migration
 	UniquePtr<UploadBuffer<ObjectConstants>> m_objectCB;
-	UniquePtr<MeshGeometry> m_boxGeo;
+	UniquePtr<GeometryAltas> m_boxGeo;
 
 	int m_currBackBuffer = 0;
     static const int m_swapChainBufferCount = 2;
@@ -84,8 +80,6 @@ private:
 	ComPtr<ID3D12PipelineState> m_PSO = nullptr; // For now it's a default opaque PSO
 	ComPtr<ID3D12PipelineState> m_wireframePSO = nullptr;
 	bool m_isWireframe = false;
-
-    HashMap<String, UniquePtr<Texture>> m_textures;
 
     // Core D3D12 objects
     ComPtr<ID3D12Device> m_device;

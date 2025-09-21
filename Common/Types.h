@@ -40,6 +40,9 @@ template<typename T>
 using WeakPtr = std::weak_ptr<T>;
 
 // Containers
+template<typename T, size_t N>
+using Array = std::array<T, N>;
+
 template<typename T>
 using Vector = std::vector<T>;
 

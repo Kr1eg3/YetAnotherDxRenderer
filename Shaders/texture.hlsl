@@ -12,7 +12,26 @@ SamplerState gsamAnisotropicClamp : register(s5);
 
 cbuffer cbPerObject : register(b0)
 {
-	float4x4 gWorldViewProj; 
+	float4x4 gWorld;
+	float4x4 gTexTransform;
+};
+
+cbuffer cbPass : register(b1)
+{
+    float4x4 gView;
+    float4x4 gInvView;
+    float4x4 gProj;
+    float4x4 gInvProj;
+    float4x4 gViewProj;
+    float4x4 gInvViewProj;
+    float3 gEyePosW;
+    float cbPerObjectPad1;
+    float2 gRenderTargetSize;
+    float2 gInvRenderTargetSize;
+    float gNearZ;
+    float gFarZ;
+    float gTotalTime;
+    float gDeltaTime;
 };
 
 struct VertexIn
@@ -31,13 +50,16 @@ struct VertexOut
 VertexOut VS(VertexIn vin)
 {
 	VertexOut vout;
-	
-	// Transform to homogeneous clip space.
-	vout.PosH = mul(float4(vin.PosL, 1.0f), gWorldViewProj);
-	
-	// Pass texture coordinates to pixel shader
-    vout.TexC = vin.TexC;
-    
+
+	// Transform to world space.
+    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
+
+    // Transform to homogeneous clip space.
+	vout.PosH = mul(posW, gViewProj);
+
+	// Pass texture coordinates to pixel shader (apply texture transform)
+    vout.TexC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform).xy;
+
     return vout;
 }
 

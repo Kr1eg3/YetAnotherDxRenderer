@@ -13,7 +13,6 @@ Application::Application(const ApplicationConfig& config)
 		throw std::runtime_error("Window init failed");
     }
 
-    // Setup event callbacks
     SetupEventCallbacks();
 
 	m_graphics = std::make_unique<Graphics>(m_window.get());

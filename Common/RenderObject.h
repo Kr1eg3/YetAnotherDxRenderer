@@ -3,8 +3,8 @@
 #include <UploadBuffer.h>
 
 struct ObjectConstants {
-    DirectX::XMFLOAT4X4 WorldViewProj;
-    DirectX::XMFLOAT4X4 World;
+    DirectX::XMFLOAT4X4 World = Identity4x4();
+    DirectX::XMFLOAT4X4 TexTransform = Identity4x4();
 };
 
 class IRenderObject {
@@ -113,11 +113,11 @@ protected:
         using namespace DirectX;
 
         XMMATRIX world = XMLoadFloat4x4(&m_world);
-        XMMATRIX worldViewProj = world * view * proj;
+        XMMATRIX texTransform = XMMatrixIdentity(); // Default identity for now
 
         ObjectConstants objConstants;
-        XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
         XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(world));
+        XMStoreFloat4x4(&objConstants.TexTransform, XMMatrixTranspose(texTransform));
 
         m_objectCB->CopyData(m_cbElementIndex, objConstants);
     }

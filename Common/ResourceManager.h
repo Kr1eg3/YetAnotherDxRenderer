@@ -1,8 +1,9 @@
 #pragma once
 
 #include "RenderComponents.h"
-#if 0
+
 class RenderItem {
+public:
 	RenderItem() = default;
     RenderItem(const RenderItem& rhs) = delete;
 
@@ -17,13 +18,14 @@ class RenderItem {
 	// Because we have an object cbuffer for each FrameResource, we have to apply the
 	// update to each FrameResource.  Thus, when we modify obect data we should set
 	// NumFramesDirty = gNumFrameResources so that each frame resource gets the update.
-	int NumFramesDirty = gNumFrameResources;
+	int NumFramesDirty = 3;
 
 	// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
 	UINT ObjCBIndex = -1;
 
-	Material* Mat = nullptr;
-	MeshGeometry* Geo = nullptr;
+	//Material* Mat = nullptr;
+	GeometryAltas* Geo = nullptr;
+	int TextureIndex = 0; // Index in texture atlas
 
     // Primitive topology.
     D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -33,7 +35,7 @@ class RenderItem {
     UINT StartIndexLocation = 0;
     int BaseVertexLocation = 0;
 };
-#endif
+
 class ResourceManager {
 public:
     ResourceManager(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
@@ -172,10 +174,18 @@ public:
 
     ID3D12Device* GetDevice() const { return m_device; }
     ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList; }
+	ComPtr<ID3D12RootSignature> GetRootSignature() const { return m_rootSignature; }
+
+    // Get render items
+    const Vector<UniquePtr<RenderItem>>& GetAllRenderItems() const { return m_allRitems; }
 
 private:
     ID3D12Device* m_device;
     ID3D12GraphicsCommandList* m_commandList;
+    ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
+
+	// List of all the render items.
+	Vector<UniquePtr<RenderItem>> m_allRitems;
 
     // Single geometry atlas containing all primitive meshes
     SharedPtr<GeometryAltas> m_primitiveAtlas;
@@ -197,4 +207,9 @@ private:
     // Initialize the primitive atlas with all basic geometries
     void InitializeGeoAtlas();
     void InitializeTextureAtlas();
+
+	void BuildRootSignature();
+	void BuildRenderItems();
+
+	Array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 };

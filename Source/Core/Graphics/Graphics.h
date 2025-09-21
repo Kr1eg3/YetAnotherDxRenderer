@@ -43,34 +43,25 @@ private:
     D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView() const;
 
     // Need to store this functions in Sceen class later
-	void BuildGeoAtlas();
     void BuildPSOs();
 	void BuildDefaultPSO();
 	void BuildWireframePSO();
     void BuildShadersAndInputLayout();
-    void BuildRootSignature();
 	void BuildFrameResources();
+    void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems);
 
-    // Textures
-    void LoadTextures();
     std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 private:
 	Window* m_window = nullptr;
+
+	UniquePtr<ResourceManager> m_resourceManager;
 
 	// Frame Resources for CPU-GPU parallelism
 	static const int NumFrameResources = 3;
 	Vector<UniquePtr<FrameResource>> m_frameResources;
 	FrameResource* m_currFrameResource = nullptr;
 	int m_currFrameResourceIndex = 0;
-
-	// New render system
-	UniquePtr<ResourceManager> m_resourceManager;
-	UniquePtr<StaticMesh> m_boxObject;
-
-	// Legacy - will be removed after full migration
-	UniquePtr<UploadBuffer<ObjectConstants>> m_objectCB;
-	UniquePtr<GeometryAltas> m_boxGeo;
 
 	int m_currBackBuffer = 0;
     static const int m_swapChainBufferCount = 2;
@@ -92,8 +83,6 @@ private:
 
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-
-    ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
     ComPtr<ID3D12DescriptorHeap> m_cbvHeap = nullptr;
 
 	// Set true to use 4X MSAA (�4.1.8).  The default is false.
@@ -125,7 +114,7 @@ private:
 
     float mTheta = 1.5f*DirectX::XM_PI;
     float mPhi = DirectX::XM_PIDIV4;
-    float mRadius = 5.0f;
+    float mRadius = 15.0f;
 
     POINT m_lastMousePos;
 

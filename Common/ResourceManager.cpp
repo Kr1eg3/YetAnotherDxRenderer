@@ -2,8 +2,12 @@
 
 ResourceManager::ResourceManager(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList)
     : m_device(device), m_commandList(cmdList) {
-    InitializeGeoAtlas();
+
     InitializeTextureAtlas();
+    BuildRootSignature();
+    InitializeGeoAtlas();
+
+    BuildRenderItems();
 }
 
 ComPtr<ID3D12Resource> ResourceManager::CreateDefaultBuffer(const void* initData,
@@ -447,10 +451,10 @@ SharedPtr<IMeshComponent> ResourceManager::CreateMeshComponent(const String& reg
 
 void ResourceManager::InitializeGeoAtlas() {
     // Create all primitive geometries
-    MeshData boxData = CreateBoxMesh();
-    MeshData planeData = CreatePlaneMesh(20.0f, 20.0f, 4, 4);
-    MeshData sphereData = CreateSphereMesh(1.0f, 20, 20);
-    MeshData cylinderData = CreateCylinderMesh(0.5f, 0.5f, 3.0f, 20, 20);
+    MeshData boxData = CreateBoxMesh(1.0f, 1.0f, 1.0f); // Как в референсе
+    MeshData planeData = CreatePlaneMesh(20.0f, 30.0f, 60, 40); // Прямоугольный как в референсе
+    MeshData sphereData = CreateSphereMesh(0.5f, 20, 20); // Уменьшенный радиус как в референсе
+    MeshData cylinderData = CreateCylinderMesh(0.5f, 0.3f, 3.0f, 20, 20); // Конус как в референсе
 
     // Calculate offsets for each mesh in the combined buffer
     uint32 currentVertexOffset = 0;
@@ -547,7 +551,7 @@ void ResourceManager::InitializeTextureAtlas() {
     m_textureAtlas->Name = "MainTextureAtlas";
 
     // Initialize descriptor heap (1 CBV + multiple textures)
-    m_textureAtlas->InitializeDescriptorHeap(m_device, 1); // 64 textures max
+    m_textureAtlas->InitializeDescriptorHeap(m_device, 64); // 64 textures max
 
     // Load default texture(s)
     auto woodCrateTex = SharedPtr<Texture>(new Texture());
@@ -560,4 +564,237 @@ void ResourceManager::InitializeTextureAtlas() {
 
     // Add texture to atlas (automatically creates SRV)
     AddTexture(woodCrateTex->name, woodCrateTex);
+
+    // Load stone texture for spheres and cylinders
+    auto stoneTex = SharedPtr<Texture>(new Texture());
+    stoneTex->name = "stone";
+    stoneTex->filename = L"Textures/stone.dds";
+
+    ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(m_device,
+        m_commandList, stoneTex->filename.c_str(),
+        stoneTex->resource, stoneTex->uploadHeap));
+
+    AddTexture(stoneTex->name, stoneTex);
+
+    // Load tile texture for floor
+    auto tileTex = SharedPtr<Texture>(new Texture());
+    tileTex->name = "tile";
+    tileTex->filename = L"Textures/tile.dds";
+
+    ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(m_device,
+        m_commandList, tileTex->filename.c_str(),
+        tileTex->resource, tileTex->uploadHeap));
+
+    AddTexture(tileTex->name, tileTex);
 }
+
+void ResourceManager::BuildRenderItems() {
+	// Box with current woodCrate texture - точно как в референсе
+	auto boxRitem = std::make_unique<RenderItem>();
+	DirectX::XMStoreFloat4x4(&boxRitem->World, DirectX::XMMatrixScaling(2.0f, 2.0f, 2.0f) * DirectX::XMMatrixTranslation(0.0f, 1.0f, 0.0f));
+	DirectX::XMStoreFloat4x4(&boxRitem->TexTransform, DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	boxRitem->ObjCBIndex = 0;
+	boxRitem->TextureIndex = 0; // woodCrate - первая загруженная текстура
+	boxRitem->Geo = m_primitiveAtlas.get();
+	boxRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	const auto* boxRegion = GetMeshRegion("box");
+	if (boxRegion) {
+		boxRitem->IndexCount = boxRegion->IndexCount;
+		boxRitem->StartIndexLocation = boxRegion->StartIndexLocation;
+		boxRitem->BaseVertexLocation = boxRegion->BaseVertexLocation;
+	}
+	m_allRitems.push_back(std::move(boxRitem));
+
+    // Floor plane with tile texture - точно как в референсе
+    auto gridRitem = std::make_unique<RenderItem>();
+    gridRitem->World = Identity4x4(); // На уровне y=0 как в референсе
+	DirectX::XMStoreFloat4x4(&gridRitem->TexTransform, DirectX::XMMatrixScaling(8.0f, 8.0f, 1.0f));
+	gridRitem->ObjCBIndex = 1;
+	gridRitem->TextureIndex = 2; // tile - третья загруженная текстура
+	gridRitem->Geo = m_primitiveAtlas.get();
+	gridRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	const auto* planeRegion = GetMeshRegion("plane");
+	if (planeRegion) {
+		gridRitem->IndexCount = planeRegion->IndexCount;
+		gridRitem->StartIndexLocation = planeRegion->StartIndexLocation;
+		gridRitem->BaseVertexLocation = planeRegion->BaseVertexLocation;
+	}
+	m_allRitems.push_back(std::move(gridRitem));
+
+	// Columns and spheres
+	DirectX::XMMATRIX brickTexTransform = DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f);
+	UINT objCBIndex = 2;
+	for(int i = 0; i < 5; ++i) {
+		// Left cylinder with stone texture
+		auto leftCylRitem = std::make_unique<RenderItem>();
+		DirectX::XMMATRIX leftCylWorld = DirectX::XMMatrixTranslation(-5.0f, 1.5f, -10.0f + i*5.0f);
+		DirectX::XMStoreFloat4x4(&leftCylRitem->World, leftCylWorld);
+		DirectX::XMStoreFloat4x4(&leftCylRitem->TexTransform, brickTexTransform);
+		leftCylRitem->ObjCBIndex = objCBIndex++;
+		leftCylRitem->TextureIndex = 1; // stone - вторая загруженная текстура
+		leftCylRitem->Geo = m_primitiveAtlas.get();
+		leftCylRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		const auto* cylinderRegion = GetMeshRegion("cylinder");
+		if (cylinderRegion) {
+			leftCylRitem->IndexCount = cylinderRegion->IndexCount;
+			leftCylRitem->StartIndexLocation = cylinderRegion->StartIndexLocation;
+			leftCylRitem->BaseVertexLocation = cylinderRegion->BaseVertexLocation;
+		}
+		m_allRitems.push_back(std::move(leftCylRitem));
+
+		// Right cylinder with stone texture
+		auto rightCylRitem = std::make_unique<RenderItem>();
+		DirectX::XMMATRIX rightCylWorld = DirectX::XMMatrixTranslation(+5.0f, 1.5f, -10.0f + i*5.0f);
+		DirectX::XMStoreFloat4x4(&rightCylRitem->World, rightCylWorld);
+		DirectX::XMStoreFloat4x4(&rightCylRitem->TexTransform, brickTexTransform);
+		rightCylRitem->ObjCBIndex = objCBIndex++;
+		rightCylRitem->TextureIndex = 1; // stone - вторая загруженная текстура
+		rightCylRitem->Geo = m_primitiveAtlas.get();
+		rightCylRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		if (cylinderRegion) {
+			rightCylRitem->IndexCount = cylinderRegion->IndexCount;
+			rightCylRitem->StartIndexLocation = cylinderRegion->StartIndexLocation;
+			rightCylRitem->BaseVertexLocation = cylinderRegion->BaseVertexLocation;
+		}
+		m_allRitems.push_back(std::move(rightCylRitem));
+
+		// Left sphere with stone texture
+		auto leftSphereRitem = std::make_unique<RenderItem>();
+		DirectX::XMMATRIX leftSphereWorld = DirectX::XMMatrixTranslation(-5.0f, 3.5f, -10.0f + i*5.0f);
+		DirectX::XMStoreFloat4x4(&leftSphereRitem->World, leftSphereWorld);
+		leftSphereRitem->TexTransform = Identity4x4();
+		leftSphereRitem->ObjCBIndex = objCBIndex++;
+		leftSphereRitem->TextureIndex = 1; // stone - вторая загруженная текстура
+		leftSphereRitem->Geo = m_primitiveAtlas.get();
+		leftSphereRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		const auto* sphereRegion = GetMeshRegion("sphere");
+		if (sphereRegion) {
+			leftSphereRitem->IndexCount = sphereRegion->IndexCount;
+			leftSphereRitem->StartIndexLocation = sphereRegion->StartIndexLocation;
+			leftSphereRitem->BaseVertexLocation = sphereRegion->BaseVertexLocation;
+		}
+		m_allRitems.push_back(std::move(leftSphereRitem));
+
+		// Right sphere with stone texture
+		auto rightSphereRitem = std::make_unique<RenderItem>();
+		DirectX::XMMATRIX rightSphereWorld = DirectX::XMMatrixTranslation(+5.0f, 3.5f, -10.0f + i*5.0f);
+		DirectX::XMStoreFloat4x4(&rightSphereRitem->World, rightSphereWorld);
+		rightSphereRitem->TexTransform = Identity4x4();
+		rightSphereRitem->ObjCBIndex = objCBIndex++;
+		rightSphereRitem->TextureIndex = 1; // stone - вторая загруженная текстура
+		rightSphereRitem->Geo = m_primitiveAtlas.get();
+		rightSphereRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		if (sphereRegion) {
+			rightSphereRitem->IndexCount = sphereRegion->IndexCount;
+			rightSphereRitem->StartIndexLocation = sphereRegion->StartIndexLocation;
+			rightSphereRitem->BaseVertexLocation = sphereRegion->BaseVertexLocation;
+		}
+		m_allRitems.push_back(std::move(rightSphereRitem));
+	}
+
+	// All render items divided by PSO.
+	for(auto& e : m_allRitems) {
+		// For now all items use the same PSO
+	}
+}
+
+void ResourceManager::BuildRootSignature() {
+	// Shader programs typically require resources as input (constant buffers,
+	// textures, samplers).  The root signature defines the resources the shader
+	// programs expect.  If we think of the shader programs as a function, and
+	// the input resources as function parameters, then the root signature can be
+	// thought of as defining the function signature.
+
+	// Root parameter can be a table, root descriptor or root constants.
+	CD3DX12_ROOT_PARAMETER slotRootParameter[3];
+
+	// Create SRV table for textures
+	CD3DX12_DESCRIPTOR_RANGE texTable;
+	texTable.Init(
+        D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+		1,  // number of descriptors
+		0); // register t0
+
+	slotRootParameter[0].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+	slotRootParameter[1].InitAsConstantBufferView(0); // register b0 - Object constants
+	slotRootParameter[2].InitAsConstantBufferView(1); // register b1 - Pass constants
+
+	// Create samplers
+	auto staticSamplers = GetStaticSamplers();
+
+	// A root signature is an array of root parameters.
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter,
+		(UINT)staticSamplers.size(), staticSamplers.data(),
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	// create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+	if (errorBlob != nullptr) {
+		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	}
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(m_device->CreateRootSignature(
+		0,
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(),
+		IID_PPV_ARGS(&m_rootSignature)));
+}
+
+Array<const CD3DX12_STATIC_SAMPLER_DESC, 6> ResourceManager::GetStaticSamplers() {
+	// Applications usually only need a handful of samplers. So just define them all up front
+	// and keep them available as part of the root signature.
+
+	const CD3DX12_STATIC_SAMPLER_DESC pointWrap(
+		0, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+
+	const CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+		1, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
+
+	const CD3DX12_STATIC_SAMPLER_DESC linearWrap(
+		2, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+
+	const CD3DX12_STATIC_SAMPLER_DESC linearClamp(
+		3, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
+
+	const CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
+		4, // shaderRegister
+		D3D12_FILTER_ANISOTROPIC, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressW
+		0.0f,                              // mipLODBias
+		8);                                // maxAnisotropy
+
+	const CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
+		5, // shaderRegister
+		D3D12_FILTER_ANISOTROPIC, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressW
+		0.0f,                               // mipLODBias
+		8);                                 // maxAnisotropy
+
+	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
+}
+

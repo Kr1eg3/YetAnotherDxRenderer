@@ -308,9 +308,7 @@ struct TextureAtlas {
 
         // Create SRV descriptor
         CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-        if (index > 0) {
-            srvHandle.Offset(1, DescriptorSize);
-        }
+        srvHandle.Offset(index, DescriptorSize);
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;

@@ -43,15 +43,13 @@ Graphics::Graphics(Window* wnd)
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(m_commandList->Reset(m_directCmdListAlloc.Get(), nullptr));
+	/*******************************************************************************/
 
 	/*	This is the place where most of the sample specific code. In future i thought
 	*	this should be moved in Sceene abstaction class. App should have something like
 	*   SceneManager which manages multiple scenes. Each scene should create it's own
 	*   resources, PSOs, descriptor heaps etc.
 	*/
-
-	// Build frame resources first
-	BuildFrameResources();
 
 	// Build the descriptor heaps for the scene.
     D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
@@ -62,46 +60,18 @@ Graphics::Graphics(Window* wnd)
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvHeapDesc,
         IID_PPV_ARGS(&m_cbvHeap)));
 
-	LoadTextures();
-
-	BuildRootSignature();
-
 	// Initialize ResourceManager
 	m_resourceManager = UniquePtr<ResourceManager>(
 		new ResourceManager(m_device.Get(), m_commandList.Get()));
 
-	// Use the texture atlas descriptor heap from ResourceManager
-	// instead of creating our own
-
 	// Build shaders and input layout
 	BuildShadersAndInputLayout();
 
-	// The ResourceManager now creates the atlas in its constructor
-	// Just get the mesh component from the atlas
-	auto meshComponent = m_resourceManager->CreateMeshComponent("box");
-	auto materialComponent = m_resourceManager->CreateMaterial("default");
-
-	m_boxObject = UniquePtr<StaticMesh>(new StaticMesh(meshComponent, materialComponent, "box"));
-	// Don't initialize constant buffer here - we'll use frame resources
-	// Each frame resource has its own constant buffers
-
-	// Create descriptor for the frame resource constant buffer
-	// We'll bind the appropriate one during rendering
-	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-
-	// Create CBV for the first frame resource as initial setup
-	if (m_frameResources.size() > 0 && m_frameResources[0]->ObjectCB) {
-		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_frameResources[0]->ObjectCB->Resource()->GetGPUVirtualAddress();
-		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-		cbvDesc.BufferLocation = cbAddress;
-		cbvDesc.SizeInBytes = objCBByteSize;
-
-		m_device->CreateConstantBufferView(
-			&cbvDesc,
-			m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
-	}
+	// Build frame resources after ResourceManager is created so we know how many objects we have
+	BuildFrameResources();
 
 	BuildPSOs();
+	/*******************************************************************************/
 
     // Execute the initialization commands.
     ThrowIfFailed(m_commandList->Close());
@@ -120,52 +90,6 @@ void Graphics::BuildShadersAndInputLayout() {
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
-}
-
-void Graphics::BuildRootSignature() {
-	// Shader programs typically require resources as input (constant buffers,
-	// textures, samplers).  The root signature defines the resources the shader
-	// programs expect.  If we think of the shader programs as a function, and
-	// the input resources as function parameters, then the root signature can be
-	// thought of as defining the function signature.
-
-	// Root parameter can be a table, root descriptor or root constants.
-	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
-
-	// Create a single descriptor table of CBVs.
-	CD3DX12_DESCRIPTOR_RANGE cbvTable;
-	cbvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
-	slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable);
-
-	// Create SRV table for textures
-	CD3DX12_DESCRIPTOR_RANGE texTable;
-	texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-	slotRootParameter[1].InitAsDescriptorTable(1, &texTable);
-
-	// Create samplers
-	auto staticSamplers = GetStaticSamplers();
-
-	// A root signature is an array of root parameters.
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter,
-		(UINT)staticSamplers.size(), staticSamplers.data(),
-		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-	// create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
-	ComPtr<ID3DBlob> serializedRootSig = nullptr;
-	ComPtr<ID3DBlob> errorBlob = nullptr;
-	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
-
-	if (errorBlob != nullptr) {
-		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-	}
-	ThrowIfFailed(hr);
-
-	ThrowIfFailed(m_device->CreateRootSignature(
-		0,
-		serializedRootSig->GetBufferPointer(),
-		serializedRootSig->GetBufferSize(),
-		IID_PPV_ARGS(&m_rootSignature)));
 }
 
 void Graphics::CacheDescSizes() {
@@ -329,20 +253,26 @@ void Graphics::Update(float32 deltaTime) {
 		CloseHandle(eventHandle);
 	}
 
-	// Update object constant buffers
+	// Update object constant buffers for all render items
 	DirectX::XMMATRIX view = DirectX::XMLoadFloat4x4(&mView);
 	DirectX::XMMATRIX proj = DirectX::XMLoadFloat4x4(&mProj);
 
-	// Update the constant buffer for this frame
-	if (m_boxObject && m_currFrameResource->ObjectCB) {
-		DirectX::XMMATRIX world = DirectX::XMLoadFloat4x4(&m_boxObject->GetWorldMatrix());
-		DirectX::XMMATRIX worldViewProj = world * view * proj;
+	const auto& renderItems = m_resourceManager->GetAllRenderItems();
+	for (const auto& ri : renderItems) {
+		// Only update the cbuffer data if the constants have changed
+		if (ri->NumFramesDirty > 0) {
+			DirectX::XMMATRIX world = DirectX::XMLoadFloat4x4(&ri->World);
+			DirectX::XMMATRIX texTransform = DirectX::XMLoadFloat4x4(&ri->TexTransform);
 
-		ObjectConstants objConstants;
-		DirectX::XMStoreFloat4x4(&objConstants.WorldViewProj, DirectX::XMMatrixTranspose(worldViewProj));
-		DirectX::XMStoreFloat4x4(&objConstants.World, DirectX::XMMatrixTranspose(world));
+			ObjectConstants objConstants;
+			DirectX::XMStoreFloat4x4(&objConstants.World, DirectX::XMMatrixTranspose(world));
+			DirectX::XMStoreFloat4x4(&objConstants.TexTransform, DirectX::XMMatrixTranspose(texTransform));
 
-		m_currFrameResource->ObjectCB->CopyData(0, objConstants);
+			m_currFrameResource->ObjectCB->CopyData(ri->ObjCBIndex, objConstants);
+
+			// Decrement the dirty counter
+			ri->NumFramesDirty--;
+		}
 	}
 
 	// Update Pass constant buffer
@@ -421,35 +351,16 @@ void Graphics::DrawFrame() {
 		m_commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	}
 
-	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+	const auto rootSignature = m_resourceManager->GetRootSignature();
+	m_commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-	// New render system with frame resources
-	if (m_boxObject && m_currFrameResource->ObjectCB) {
-		// Update the CBV to point to the current frame resource's constant buffer
-		UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-		D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_currFrameResource->ObjectCB->Resource()->GetGPUVirtualAddress();
+	// Bind Pass constants (slot 2)
+	auto passCB = m_currFrameResource->PassCB->Resource();
+	m_commandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
 
-		// Create/Update the CBV for this frame
-		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-		cbvDesc.BufferLocation = cbAddress;
-		cbvDesc.SizeInBytes = objCBByteSize;
-		m_device->CreateConstantBufferView(&cbvDesc, m_cbvHeap->GetCPUDescriptorHandleForHeapStart());
-
-		// Bind the CBV descriptor table (slot 0)
-		m_commandList->SetGraphicsRootDescriptorTable(0, m_cbvHeap->GetGPUDescriptorHandleForHeapStart());
-
-		// Bind the texture SRV descriptor table (slot 1) from ResourceManager's texture atlas
-		if (textureAtlas) {
-			// Get texture index for "woodCrate" texture
-			int textureIndex = m_resourceManager->GetTextureIndex("woodCrate");
-			if (textureIndex >= 0) {
-				auto texHandle = textureAtlas->GetGPUHandle(static_cast<uint32>(textureIndex));
-				m_commandList->SetGraphicsRootDescriptorTable(1, texHandle);
-			}
-		}
-
-		m_boxObject->Render(m_commandList.Get());
-	}
+	// Draw all render items from ResourceManager
+	const auto& renderItems = m_resourceManager->GetAllRenderItems();
+	DrawRenderItems(m_commandList.Get(), renderItems);
 
     // Indicate a state transition on the resource usage.
 	CD3DX12_RESOURCE_BARRIER presentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -623,15 +534,15 @@ void Graphics::OnMouseMove(int32 x, int32 y) {
         mPhi = std::clamp(mPhi, 0.1f, DirectX::XM_PI - 0.1f);
     }
     else if (m_window->IsMouseButtonPressed(MouseButton::Right)) {
-        // Make each pixel correspond to 0.005 unit in the scene.
-        float dx = 0.005f * static_cast<float>(x - m_lastMousePos.x);
-        float dy = 0.005f * static_cast<float>(y - m_lastMousePos.y);
+        // Make each pixel correspond to 0.05 unit in the scene.
+        float dx = 0.05f * static_cast<float>(x - m_lastMousePos.x);
+        float dy = 0.05f * static_cast<float>(y - m_lastMousePos.y);
 
         // Update the camera radius based on input.
         mRadius += dx - dy;
 
         // Restrict the radius.
-        mRadius = std::clamp(mRadius, 3.0f, 15.0f);
+        mRadius = std::clamp(mRadius, 5.0f, 150.0f);
     }
 
     m_lastMousePos.x = x;
@@ -645,10 +556,11 @@ void Graphics::OnKeyDown(KeyCode keyCode) {
 }
 
 void Graphics::BuildDefaultPSO() {
+	const auto rootSignature = m_resourceManager->GetRootSignature();
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
     ZeroMemory(&psoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
     psoDesc.InputLayout = { m_inputLayout.data(), (UINT)m_inputLayout.size() };
-    psoDesc.pRootSignature = m_rootSignature.Get();
+    psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS =
 	{
 		reinterpret_cast<BYTE*>(m_vsByteCode->GetBufferPointer()),
@@ -675,11 +587,11 @@ void Graphics::BuildDefaultPSO() {
 }
 
 void Graphics::BuildWireframePSO() {
-    // Start with the same PSO desc as the default PSO
+	const auto rootSignature = m_resourceManager->GetRootSignature();
     D3D12_GRAPHICS_PIPELINE_STATE_DESC wireframePsoDesc;
     ZeroMemory(&wireframePsoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
     wireframePsoDesc.InputLayout = { m_inputLayout.data(), (UINT)m_inputLayout.size() };
-    wireframePsoDesc.pRootSignature = m_rootSignature.Get();
+    wireframePsoDesc.pRootSignature = rootSignature.Get();
     wireframePsoDesc.VS =
 	{
 		reinterpret_cast<BYTE*>(m_vsByteCode->GetBufferPointer()),
@@ -709,29 +621,29 @@ void Graphics::BuildWireframePSO() {
 	m_resourceManager->AddPSO("wireframe", m_wireframePSO);
 }
 
-void Graphics::BuildGeoAtlas() {
-
-}
-
 void Graphics::BuildPSOs() {
 	BuildDefaultPSO();
 	BuildWireframePSO();
 }
 
 void Graphics::BuildFrameResources() {
+	// Get the number of render items from ResourceManager
+	const auto& renderItems = m_resourceManager->GetAllRenderItems();
+	UINT numObjects = static_cast<UINT>(renderItems.size());
+
+	// Ensure we have at least 1 object for safety
+	if (numObjects == 0) {
+		numObjects = 1;
+	}
+
 	for (int i = 0; i < NumFrameResources; ++i) {
 		m_frameResources.push_back(UniquePtr<FrameResource>(
 			new FrameResource(m_device.Get(),
-				1,  // 1 pass CB
-				1,  // 1 object CB (for now, increase if you have more objects)
-				1)  // 1 material CB
+				1,         // 1 pass CB
+				numObjects, // Number of object CBs based on render items
+				1)         // 1 material CB
 		));
 	}
-}
-
-void Graphics::LoadTextures() {
-	// Textures are now loaded by ResourceManager in InitializeTextureAtlas()
-	// No need to load them here anymore
 }
 
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {
@@ -785,4 +697,40 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {
 		8);                                 // maxAnisotropy
 
 	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
+}
+
+void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {
+    if (!cmdList || !m_currFrameResource || !m_currFrameResource->ObjectCB) {
+        return;
+    }
+
+    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+
+    for (size_t i = 0; i < ritems.size(); ++i) {
+        auto ri = ritems[i].get();
+        if (!ri || !ri->Geo) {
+            continue;
+        }
+
+        auto vbv = ri->Geo->VertexBufferView();
+        auto ibv = ri->Geo->IndexBufferView();
+        cmdList->IASetVertexBuffers(0, 1, &vbv);
+        cmdList->IASetIndexBuffer(&ibv);
+        cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
+
+        // Bind the texture SRV descriptor table (slot 0) - use texture from render item
+        if (ri->TextureIndex >= 0) {
+            auto textureAtlas = m_resourceManager->GetTextureAtlas();
+            if (textureAtlas) {
+                auto texHandle = textureAtlas->GetGPUHandle(static_cast<uint32>(ri->TextureIndex));
+                cmdList->SetGraphicsRootDescriptorTable(0, texHandle);
+            }
+        }
+
+        // Bind the CBV directly (slot 1) - matches new root signature
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_currFrameResource->ObjectCB->Resource()->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+        cmdList->SetGraphicsRootConstantBufferView(1, cbAddress);
+
+        cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
+    }
 }

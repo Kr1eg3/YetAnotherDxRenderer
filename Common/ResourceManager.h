@@ -63,26 +63,6 @@ public:
         return m_textureAtlas ? m_textureAtlas->GetTextureIndex(name) : -1;
     }
 
-    // Static mesh creation methods that return MeshData
-    static MeshData CreateBoxMesh(float width = 2.0f,
-                                  float height = 2.0f,
-                                  float depth = 2.0f);
-
-    static MeshData CreateSphereMesh(float radius = 1.0f,
-                                     uint32 sliceCount = 20,
-                                     uint32 stackCount = 20);
-
-    static MeshData CreateCylinderMesh(float bottomRadius = 0.5f,
-                                       float topRadius = 0.5f,
-                                       float height = 3.0f,
-                                       uint32 sliceCount = 20,
-                                       uint32 stackCount = 20);
-
-    static MeshData CreatePlaneMesh(float width = 10.0f,
-                                    float depth = 10.0f,
-                                    uint32 m = 2,
-                                    uint32 n = 2);
-
     // Texture management
     SharedPtr<Texture> GetTexture(const String& name) {
         if (!m_textureAtlas) return nullptr;
@@ -175,8 +155,6 @@ public:
     ID3D12Device* GetDevice() const { return m_device; }
     ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList; }
 	ComPtr<ID3D12RootSignature> GetRootSignature() const { return m_rootSignature; }
-
-    // Get render items
     const Vector<UniquePtr<RenderItem>>& GetAllRenderItems() const { return m_allRitems; }
 
 private:

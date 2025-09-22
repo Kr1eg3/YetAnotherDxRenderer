@@ -150,13 +150,10 @@ private:
 
 class d3dUtil {
 public:
-
     static bool IsKeyDown(int vkeyCode);
-
     static std::string ToString(HRESULT hr);
-
-    static UINT CalcConstantBufferByteSize(UINT byteSize)
-    {
+    static ComPtr<ID3DBlob> LoadBinary(const std::wstring& filename);
+    static UINT CalcConstantBufferByteSize(UINT byteSize) {
         // Constant buffers must be a multiple of the minimum hardware
         // allocation size (usually 256 bytes).  So round up to nearest
         // multiple of 256.  We do this by adding 255 and then masking off
@@ -171,8 +168,6 @@ public:
         return (byteSize + 255) & ~255;
     }
 
-    static ComPtr<ID3DBlob> LoadBinary(const std::wstring& filename);
-
     static ComPtr<ID3D12Resource> CreateDefaultBuffer(
         ID3D12Device* device,
         ID3D12GraphicsCommandList* cmdList,
@@ -185,6 +180,29 @@ public:
 		const D3D_SHADER_MACRO* defines,
 		const std::string& entrypoint,
 		const std::string& target);
+};
+
+// Static mesh creation methods that return MeshData
+class GeometryGenerator {
+public:
+    static MeshData CreateBoxMesh(float width = 2.0f,
+                                  float height = 2.0f,
+                                  float depth = 2.0f);
+
+    static MeshData CreatePlaneMesh(float width = 10.0f,
+                                    float depth = 10.0f,
+                                    uint32 m = 2,
+                                    uint32 n = 2);
+
+    static MeshData CreateSphereMesh(float radius = 1.0f,
+                                     uint32 sliceCount = 20,
+                                     uint32 stackCount = 20);
+
+    static MeshData CreateCylinderMesh(float bottomRadius = 0.5f,
+                                       float topRadius = 0.5f,
+                                       float height = 3.0f,
+                                       uint32 sliceCount = 20,
+                                       uint32 stackCount = 20);
 };
 
 // Defines a subrange of geometry in a GeometryAltas.  This is for when multiple

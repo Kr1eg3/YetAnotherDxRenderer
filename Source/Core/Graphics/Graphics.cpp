@@ -293,7 +293,7 @@ void Graphics::Update(float32 deltaTime) {
 		passConstants.InvRenderTargetSize = DirectX::XMFLOAT2(1.0f / m_window->GetWidth(), 1.0f / m_window->GetHeight());
 		passConstants.NearZ = 1.0f;
 		passConstants.FarZ = 1000.0f;
-		passConstants.TotalTime = 0.0f; // You might want to track total time
+		passConstants.TotalTime = 0.0f;
 		passConstants.DeltaTime = deltaTime;
 
 		m_currFrameResource->PassCB->CopyData(0, passConstants);
@@ -630,18 +630,14 @@ void Graphics::BuildFrameResources() {
 	// Get the number of render items from ResourceManager
 	const auto& renderItems = m_resourceManager->GetAllRenderItems();
 	UINT numObjects = static_cast<UINT>(renderItems.size());
-
-	// Ensure we have at least 1 object for safety
-	if (numObjects == 0) {
-		numObjects = 1;
-	}
+	assert(numObjects > 0 && "There should be at least one render item");
 
 	for (int i = 0; i < NumFrameResources; ++i) {
 		m_frameResources.push_back(UniquePtr<FrameResource>(
 			new FrameResource(m_device.Get(),
-				1,         // 1 pass CB
+				1,          // 1 pass CB
 				numObjects, // Number of object CBs based on render items
-				1)         // 1 material CB
+				1)			// 1 material CB
 		));
 	}
 }
@@ -700,37 +696,36 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {
 }
 
 void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {
-    if (!cmdList || !m_currFrameResource || !m_currFrameResource->ObjectCB) {
-        return;
-    }
+	if (!cmdList || !m_currFrameResource || !m_currFrameResource->ObjectCB) {
+		return;
+	}
 
-    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	const auto textureAtlas = m_resourceManager->GetTextureAtlas();
+	assert(textureAtlas && "Texture atlas is null");
 
-    for (size_t i = 0; i < ritems.size(); ++i) {
-        auto ri = ritems[i].get();
-        if (!ri || !ri->Geo) {
-            continue;
-        }
+	const auto objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
-        auto vbv = ri->Geo->VertexBufferView();
-        auto ibv = ri->Geo->IndexBufferView();
+	const auto objectCB = m_currFrameResource->ObjectCB->Resource();
+
+	for (const auto& ri : ritems) {
+		if (!ri || !ri->Geo) {
+			continue;
+		}
+
+        const auto vbv = ri->Geo->VertexBufferView();
+        const auto ibv = ri->Geo->IndexBufferView();
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
         cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
 
-        // Bind the texture SRV descriptor table (slot 0) - use texture from render item
-        if (ri->TextureIndex >= 0) {
-            auto textureAtlas = m_resourceManager->GetTextureAtlas();
-            if (textureAtlas) {
-                auto texHandle = textureAtlas->GetGPUHandle(static_cast<uint32>(ri->TextureIndex));
-                cmdList->SetGraphicsRootDescriptorTable(0, texHandle);
-            }
-        }
+		assert(ri->TextureIndex >= -1 && "Texture index is invalid");
+		const auto texHandle = textureAtlas->GetGPUHandle(static_cast<uint32>(ri->TextureIndex));
+		cmdList->SetGraphicsRootDescriptorTable(0, texHandle);
 
-        // Bind the CBV directly (slot 1) - matches new root signature
-        D3D12_GPU_VIRTUAL_ADDRESS cbAddress = m_currFrameResource->ObjectCB->Resource()->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
-        cmdList->SetGraphicsRootConstantBufferView(1, cbAddress);
+        const auto objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+        cmdList->SetGraphicsRootConstantBufferView(1, objCBAddress);
 
         cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
-    }
+
+	}
 }

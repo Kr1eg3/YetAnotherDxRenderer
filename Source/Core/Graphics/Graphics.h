@@ -28,7 +28,9 @@ public:
 	void OnKeyDown(KeyCode keyCode);
 
 	void OnResize();
+
 private:
+	int PickObject(int32 x, int32 y);
     void CreateDevice();
     void CacheDescSizes();
     void CreateSwapChain();
@@ -46,6 +48,7 @@ private:
     void BuildPSOs();
 	void BuildDefaultPSO();
 	void BuildWireframePSO();
+	void BuildOutlinePSO();
     void BuildShadersAndInputLayout();
 	void BuildFrameResources();
     void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems);
@@ -70,6 +73,7 @@ private:
 
 	ComPtr<ID3D12PipelineState> m_PSO = nullptr; // For now it's a default opaque PSO
 	ComPtr<ID3D12PipelineState> m_wireframePSO = nullptr;
+	ComPtr<ID3D12PipelineState> m_outlinePSO = nullptr;
 	bool m_isWireframe = false;
 
     // Core D3D12 objects
@@ -95,6 +99,8 @@ private:
 
     ComPtr<ID3DBlob> m_vsByteCode = nullptr;
     ComPtr<ID3DBlob> m_psByteCode = nullptr;
+    ComPtr<ID3DBlob> m_outlineVsByteCode = nullptr;
+    ComPtr<ID3DBlob> m_outlinePsByteCode = nullptr;
     std::vector<D3D12_INPUT_ELEMENT_DESC> m_inputLayout;
 
     D3D12_VIEWPORT m_screenViewport;
@@ -117,5 +123,8 @@ private:
     float mRadius = 15.0f;
 
     POINT m_lastMousePos;
+
+    // Object selection
+    int m_selectedObjectIndex = -1;  // Index of selected render item
 
 };

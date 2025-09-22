@@ -1,14 +1,6 @@
 //***************************************************************************************
-// texture.hlsl - Simple texture mapping shader without lighting
+// outline.hlsl - Simple green outline shader
 //***************************************************************************************
-
-Texture2D gDiffuseMap : register(t0);
-SamplerState gsamPointWrap : register(s0);
-SamplerState gsamPointClamp : register(s1);
-SamplerState gsamLinearWrap : register(s2);
-SamplerState gsamLinearClamp : register(s3);
-SamplerState gsamAnisotropicWrap : register(s4);
-SamplerState gsamAnisotropicClamp : register(s5);
 
 cbuffer cbPerObject : register(b0)
 {
@@ -44,29 +36,23 @@ struct VertexIn
 struct VertexOut
 {
 	float4 PosH  : SV_POSITION;
-    float2 TexC : TEXCOORD;
 };
 
 VertexOut VS(VertexIn vin)
 {
 	VertexOut vout;
 
-	// Transform to world space.
-    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
+	// Transform to world space and scale slightly outward for outline effect
+    float4 posW = mul(float4(vin.PosL + vin.NormalL * 0.02f, 1.0f), gWorld);
 
     // Transform to homogeneous clip space.
 	vout.PosH = mul(posW, gViewProj);
-
-	// Pass texture coordinates to pixel shader (apply texture transform)
-    vout.TexC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform).xy;
 
     return vout;
 }
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    // Sample the texture
-    float4 diffuseAlbedo = gDiffuseMap.Sample(gsamAnisotropicWrap, pin.TexC);
-
-    return diffuseAlbedo;
+    // Always return green color for outline
+    return float4(0.0f, 1.0f, 0.0f, 1.0f);
 }

@@ -85,6 +85,11 @@ Graphics::Graphics(Window* wnd)
 void Graphics::BuildShadersAndInputLayout() {
 	m_vsByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "VS", "vs_5_0");
 	m_psByteCode = d3dUtil::CompileShader(L"Shaders\\texture.hlsl", nullptr, "PS", "ps_5_0");
+
+	// Compile outline shaders
+	m_outlineVsByteCode = d3dUtil::CompileShader(L"Shaders\\outline.hlsl", nullptr, "VS", "vs_5_0");
+	m_outlinePsByteCode = d3dUtil::CompileShader(L"Shaders\\outline.hlsl", nullptr, "PS", "ps_5_0");
+
 	m_inputLayout = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -513,6 +518,11 @@ void Graphics::OnMouseDown(MouseButton button, int32 x, int32 y) {
     m_lastMousePos.x = x;
     m_lastMousePos.y = y;
 
+    // Object picking on left mouse button
+    if (button == MouseButton::Left) {
+        m_selectedObjectIndex = PickObject(x, y);
+    }
+
     SetCapture(static_cast<HWND>(m_window->GetNativeHandle()));
 }
 
@@ -621,9 +631,44 @@ void Graphics::BuildWireframePSO() {
 	m_resourceManager->AddPSO("wireframe", m_wireframePSO);
 }
 
+void Graphics::BuildOutlinePSO() {
+	const auto rootSignature = m_resourceManager->GetRootSignature();
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC outlinePsoDesc;
+    ZeroMemory(&outlinePsoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
+    outlinePsoDesc.InputLayout = { m_inputLayout.data(), (UINT)m_inputLayout.size() };
+    outlinePsoDesc.pRootSignature = rootSignature.Get();
+    outlinePsoDesc.VS = {
+		reinterpret_cast<BYTE*>(m_outlineVsByteCode->GetBufferPointer()),
+		m_outlineVsByteCode->GetBufferSize()
+	};
+    outlinePsoDesc.PS = {
+		reinterpret_cast<BYTE*>(m_outlinePsByteCode->GetBufferPointer()),
+		m_outlinePsByteCode->GetBufferSize()
+	};
+    outlinePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    outlinePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    outlinePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    outlinePsoDesc.SampleMask = UINT_MAX;
+    outlinePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    outlinePsoDesc.NumRenderTargets = 1;
+    outlinePsoDesc.RTVFormats[0] = m_backBufferFormat;
+    outlinePsoDesc.SampleDesc.Count = m_4xMsaaState ? 4 : 1;
+    outlinePsoDesc.SampleDesc.Quality = m_4xMsaaState ? (m_4xMsaaQuality - 1) : 0;
+    outlinePsoDesc.DSVFormat = m_depthStencilFormat;
+
+    // Make it wireframe and scale up slightly for outline effect
+    outlinePsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    outlinePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+    ThrowIfFailed(m_device->CreateGraphicsPipelineState(&outlinePsoDesc, IID_PPV_ARGS(&m_outlinePSO)));
+
+	m_resourceManager->AddPSO("outline", m_outlinePSO);
+}
+
 void Graphics::BuildPSOs() {
 	BuildDefaultPSO();
 	BuildWireframePSO();
+	BuildOutlinePSO();
 }
 
 void Graphics::BuildFrameResources() {
@@ -695,6 +740,17 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {
 	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
 }
 
+int Graphics::PickObject(int32 x, int32 y) {
+	// Simple picking algorithm - check distance from screen center
+	// For now, just cycle through objects with each click
+	const auto& renderItems = m_resourceManager->GetAllRenderItems();
+	if (renderItems.empty()) return -1;
+
+	// Cycle to next object
+	int nextIndex = (m_selectedObjectIndex + 1) % static_cast<int>(renderItems.size());
+	return nextIndex;
+}
+
 void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {
 	if (!cmdList || !m_currFrameResource || !m_currFrameResource->ObjectCB) {
 		return;
@@ -707,6 +763,7 @@ void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<
 
 	const auto objectCB = m_currFrameResource->ObjectCB->Resource();
 
+	int itemIndex = 0;
 	for (const auto& ri : ritems) {
 		if (!ri || !ri->Geo) {
 			continue;
@@ -727,5 +784,16 @@ void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<
 
         cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 
+        // Draw outline for selected object
+        if (m_selectedObjectIndex == itemIndex) {
+            cmdList->SetPipelineState(m_outlinePSO.Get());
+            cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
+
+            // Reset to normal PSO
+            ID3D12PipelineState* normalPSO = m_isWireframe ? m_wireframePSO.Get() : m_PSO.Get();
+            cmdList->SetPipelineState(normalPSO);
+        }
+
+        itemIndex++;
 	}
 }

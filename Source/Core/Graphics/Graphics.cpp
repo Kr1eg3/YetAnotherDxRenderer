@@ -1,4 +1,5 @@
 #include "Graphics.h"
+#include <DirectXMath.h>
 
 
 Graphics::Graphics(Window* wnd)
@@ -520,7 +521,7 @@ void Graphics::OnMouseDown(MouseButton button, int32 x, int32 y) {
 
     // Object picking on left mouse button
     if (button == MouseButton::Left) {
-        m_selectedObjectIndex = PickObject(x, y);
+        PickObject(x, y);
     }
 
     SetCapture(static_cast<HWND>(m_window->GetNativeHandle()));
@@ -740,15 +741,40 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> Graphics::GetStaticSamplers() {
 	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
 }
 
-int Graphics::PickObject(int32 x, int32 y) {
-	// Simple picking algorithm - check distance from screen center
-	// For now, just cycle through objects with each click
-	const auto& renderItems = m_resourceManager->GetAllRenderItems();
-	if (renderItems.empty()) return -1;
+void Graphics::PickObject(int32 x, int32 y) {
+	// Simple picking algorithm
+	DirectX::XMFLOAT4X4 P = mProj;
 
-	// Cycle to next object
-	int nextIndex = (m_selectedObjectIndex + 1) % static_cast<int>(renderItems.size());
-	return nextIndex;
+	// Compute picking ray in view space
+	float vx = (+2.0f*x / m_screenViewport.Width - 1.0f) / P(0, 0);
+	float vy = (-2.0f*y / m_screenViewport.Height + 1.0f) / P(1, 1);
+
+	// Ray definition in view space
+	DirectX::XMVECTOR rayOrigin = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+	DirectX::XMVECTOR rayDir = DirectX::XMVectorSet(vx, vy, 1.0f, 0.0f);
+	
+	DirectX::XMMATRIX V = DirectX::XMLoadFloat4x4(&mView);
+	DirectX::XMVECTOR det = DirectX::XMMatrixDeterminant(V);
+	DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(&det, V);
+
+	auto& renderItems = m_resourceManager->GetAllRenderItems();
+
+	for(const auto& ri : renderItems) {
+		auto geo = ri->Geo;
+
+		DirectX::XMMATRIX W = XMLoadFloat4x4(&ri->World);
+		DirectX::XMMATRIX invWorld = XMMatrixInverse(&det, W);
+
+		DirectX::XMMATRIX toLocal = XMMatrixMultiply(invView, invWorld);
+		DirectX::XMVECTOR localOrigin = DirectX::XMVector3TransformCoord(rayOrigin, toLocal);
+		DirectX::XMVECTOR localDir = DirectX::XMVector3TransformNormal(rayDir, toLocal);
+		localDir = DirectX::XMVector3Normalize(localDir);
+
+		float tmin = 0.0f;
+		if(ri->Bounds.Intersects(localOrigin, localDir, tmin)) {
+			m_selectedObjectIndex = ri->index;
+		}
+	}
 }
 
 void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {
@@ -768,8 +794,7 @@ void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<
 		if (!ri || !ri->Geo) {
 			continue;
 		}
-
-        const auto vbv = ri->Geo->VertexBufferView();
+		const auto vbv = ri->Geo->VertexBufferView();
         const auto ibv = ri->Geo->IndexBufferView();
         cmdList->IASetVertexBuffers(0, 1, &vbv);
         cmdList->IASetIndexBuffer(&ibv);
@@ -785,7 +810,7 @@ void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<
         cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 
         // Draw outline for selected object
-        if (m_selectedObjectIndex == itemIndex) {
+        if (m_selectedObjectIndex == ri->index) {
             cmdList->SetPipelineState(m_outlinePSO.Get());
             cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 

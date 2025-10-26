@@ -2,10 +2,13 @@
 
 #include "RenderComponents.h"
 
+
 class RenderItem {
 public:
 	RenderItem() = default;
     RenderItem(const RenderItem& rhs) = delete;
+
+    DirectX::BoundingBox Bounds;
 
     // World matrix of the shape that describes the object's local space
     // relative to the world space, which defines the position, orientation,
@@ -34,6 +37,7 @@ public:
     UINT IndexCount = 0;
     UINT StartIndexLocation = 0;
     int BaseVertexLocation = 0;
+    int index = 0;
 };
 
 class ResourceManager {

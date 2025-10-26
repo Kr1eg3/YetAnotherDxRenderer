@@ -30,7 +30,7 @@ public:
 	void OnResize();
 
 private:
-	int PickObject(int32 x, int32 y);
+	void PickObject(int32 x, int32 y);
     void CreateDevice();
     void CacheDescSizes();
     void CreateSwapChain();

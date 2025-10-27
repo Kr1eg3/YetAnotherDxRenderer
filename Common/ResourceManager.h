@@ -42,6 +42,10 @@ public:
 
     ~ResourceManager() = default;
 
+    void AddRenderItemObject(GeometryAltas* atlas, DirectX::XMMATRIX worldTransform,
+        DirectX::XMMATRIX texTransform, UINT objCBidx, int texIdx,
+        String& meshRegionKey);
+
     // Get the main geometry atlas containing all primitive meshes
     SharedPtr<GeometryAltas> GetPrimitiveAtlas() const {
         return m_primitiveAtlas;

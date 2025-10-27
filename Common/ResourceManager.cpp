@@ -10,6 +10,24 @@ ResourceManager::ResourceManager(ID3D12Device* device, ID3D12GraphicsCommandList
     BuildRenderItems();
 }
 
+void ResourceManager::AddRenderItemObject(GeometryAltas* atlas, DirectX::XMMATRIX worldTransform,
+    DirectX::XMMATRIX texTransform, UINT objCBidx, int texIdx, String& meshRegionKey) {
+	auto ri = std::make_unique<RenderItem>();
+	DirectX::XMStoreFloat4x4(&ri->World, worldTransform);
+	DirectX::XMStoreFloat4x4(&ri->TexTransform, texTransform);
+	ri->ObjCBIndex = objCBidx;
+	ri->TextureIndex = texIdx;
+	ri->Geo = atlas;
+	ri->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	const auto* meshRegion = GetMeshRegion(meshRegionKey);
+	if (meshRegion) {
+		ri->IndexCount = meshRegion->IndexCount;
+		ri->StartIndexLocation = meshRegion->StartIndexLocation;
+		ri->BaseVertexLocation = meshRegion->BaseVertexLocation;
+	}
+	m_allRitems.push_back(std::move(ri));
+}
+
 ComPtr<ID3D12Resource> ResourceManager::CreateDefaultBuffer(const void* initData,
                                                            UINT64 byteSize,
                                                            ComPtr<ID3D12Resource>& uploadBuffer) {
@@ -265,116 +283,72 @@ void ResourceManager::InitializeTextureAtlas() {
         tileTex->resource, tileTex->uploadHeap));
 
     AddTexture(tileTex->name, tileTex);
+
+    auto grassTex = SharedPtr<Texture>(new Texture());
+    grassTex->name = "grass";
+    grassTex->filename = L"Textures/grass.dds";
+
+    ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(m_device,
+        m_commandList, grassTex->filename.c_str(),
+        grassTex->resource, grassTex->uploadHeap));
+
+    AddTexture(grassTex->name, grassTex);
 }
 
+
 void ResourceManager::BuildRenderItems() {
-	// Box with current woodCrate texture - точно как в референсе
-	auto boxRitem = std::make_unique<RenderItem>();
-	DirectX::XMStoreFloat4x4(&boxRitem->World, DirectX::XMMatrixScaling(2.0f, 2.0f, 2.0f) * DirectX::XMMatrixTranslation(0.0f, 1.0f, 0.0f));
-	DirectX::XMStoreFloat4x4(&boxRitem->TexTransform, DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f));
-	boxRitem->ObjCBIndex = 0;
-	boxRitem->TextureIndex = 0; // woodCrate - первая загруженная текстура
-	boxRitem->Geo = m_primitiveAtlas.get();
-	boxRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	const auto* boxRegion = GetMeshRegion("box");
-	if (boxRegion) {
-		boxRitem->IndexCount = boxRegion->IndexCount;
-		boxRitem->StartIndexLocation = boxRegion->StartIndexLocation;
-		boxRitem->BaseVertexLocation = boxRegion->BaseVertexLocation;
-	}
-	m_allRitems.push_back(std::move(boxRitem));
+    // Box
+    String boxKey = "box";
+    AddRenderItemObject(m_primitiveAtlas.get(),
+                       DirectX::XMMatrixScaling(2.0f, 2.0f, 2.0f) * DirectX::XMMatrixTranslation(0.0f, 1.0f, 0.0f),
+                       DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f),
+                       0, 0, boxKey);
 
-    // Floor plane with tile texture - точно как в референсе
-    auto gridRitem = std::make_unique<RenderItem>();
-    gridRitem->World = Identity4x4(); // На уровне y=0 как в референсе
-	DirectX::XMStoreFloat4x4(&gridRitem->TexTransform, DirectX::XMMatrixScaling(8.0f, 8.0f, 1.0f));
-	gridRitem->ObjCBIndex = 1;
-	gridRitem->TextureIndex = 2; // tile - третья загруженная текстура
-	gridRitem->Geo = m_primitiveAtlas.get();
-	gridRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	const auto* planeRegion = GetMeshRegion("plane");
-	if (planeRegion) {
-		gridRitem->IndexCount = planeRegion->IndexCount;
-		gridRitem->StartIndexLocation = planeRegion->StartIndexLocation;
-		gridRitem->BaseVertexLocation = planeRegion->BaseVertexLocation;
-	}
-	m_allRitems.push_back(std::move(gridRitem));
+    // Grid
+    String planeKey = "plane";
+    AddRenderItemObject(m_primitiveAtlas.get(),
+                       DirectX::XMMatrixIdentity(),
+                       DirectX::XMMatrixScaling(8.0f, 8.0f, 1.0f),
+                       1, 3, planeKey);
 
-	// Columns and spheres
-	DirectX::XMMATRIX brickTexTransform = DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f);
-	UINT objCBIndex = 2;
-	for(int i = 0; i < 5; ++i) {
-		// Left cylinder with stone texture
-		auto leftCylRitem = std::make_unique<RenderItem>();
-		DirectX::XMMATRIX leftCylWorld = DirectX::XMMatrixTranslation(-5.0f, 1.5f, -10.0f + i*5.0f);
-		DirectX::XMStoreFloat4x4(&leftCylRitem->World, leftCylWorld);
-		DirectX::XMStoreFloat4x4(&leftCylRitem->TexTransform, brickTexTransform);
-		leftCylRitem->ObjCBIndex = objCBIndex++;
-		leftCylRitem->TextureIndex = 1; // stone - вторая загруженная текстура
-		leftCylRitem->Geo = m_primitiveAtlas.get();
-		leftCylRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		const auto* cylinderRegion = GetMeshRegion("cylinder");
-		if (cylinderRegion) {
-			leftCylRitem->IndexCount = cylinderRegion->IndexCount;
-			leftCylRitem->StartIndexLocation = cylinderRegion->StartIndexLocation;
-			leftCylRitem->BaseVertexLocation = cylinderRegion->BaseVertexLocation;
-		}
-		m_allRitems.push_back(std::move(leftCylRitem));
+    // Columns and spheres
+    DirectX::XMMATRIX brickTexTransform = DirectX::XMMatrixScaling(1.0f, 1.0f, 1.0f);
+    DirectX::XMMATRIX identityTexTransform = DirectX::XMMatrixIdentity();
+    UINT objCBIndex = 2;
 
-		// Right cylinder with stone texture
-		auto rightCylRitem = std::make_unique<RenderItem>();
-		DirectX::XMMATRIX rightCylWorld = DirectX::XMMatrixTranslation(+5.0f, 1.5f, -10.0f + i*5.0f);
-		DirectX::XMStoreFloat4x4(&rightCylRitem->World, rightCylWorld);
-		DirectX::XMStoreFloat4x4(&rightCylRitem->TexTransform, brickTexTransform);
-		rightCylRitem->ObjCBIndex = objCBIndex++;
-		rightCylRitem->TextureIndex = 1; // stone - вторая загруженная текстура
-		rightCylRitem->Geo = m_primitiveAtlas.get();
-		rightCylRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		if (cylinderRegion) {
-			rightCylRitem->IndexCount = cylinderRegion->IndexCount;
-			rightCylRitem->StartIndexLocation = cylinderRegion->StartIndexLocation;
-			rightCylRitem->BaseVertexLocation = cylinderRegion->BaseVertexLocation;
-		}
-		m_allRitems.push_back(std::move(rightCylRitem));
+    String cylinderKey = "cylinder";
+    String sphereKey = "sphere";
 
-		// Left sphere with stone texture
-		auto leftSphereRitem = std::make_unique<RenderItem>();
-		DirectX::XMMATRIX leftSphereWorld = DirectX::XMMatrixTranslation(-5.0f, 3.5f, -10.0f + i*5.0f);
-		DirectX::XMStoreFloat4x4(&leftSphereRitem->World, leftSphereWorld);
-		leftSphereRitem->TexTransform = Identity4x4();
-		leftSphereRitem->ObjCBIndex = objCBIndex++;
-		leftSphereRitem->TextureIndex = 1; // stone - вторая загруженная текстура
-		leftSphereRitem->Geo = m_primitiveAtlas.get();
-		leftSphereRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		const auto* sphereRegion = GetMeshRegion("sphere");
-		if (sphereRegion) {
-			leftSphereRitem->IndexCount = sphereRegion->IndexCount;
-			leftSphereRitem->StartIndexLocation = sphereRegion->StartIndexLocation;
-			leftSphereRitem->BaseVertexLocation = sphereRegion->BaseVertexLocation;
-		}
-		m_allRitems.push_back(std::move(leftSphereRitem));
+    for(int i = 0; i < 5; ++i) {
+        // Left cylinder with stone texture
+        AddRenderItemObject(m_primitiveAtlas.get(),
+                           DirectX::XMMatrixTranslation(-5.0f, 1.5f, -10.0f + i*5.0f),
+                           brickTexTransform,
+                           objCBIndex++, 1, cylinderKey);
 
-		// Right sphere with stone texture
-		auto rightSphereRitem = std::make_unique<RenderItem>();
-		DirectX::XMMATRIX rightSphereWorld = DirectX::XMMatrixTranslation(+5.0f, 3.5f, -10.0f + i*5.0f);
-		DirectX::XMStoreFloat4x4(&rightSphereRitem->World, rightSphereWorld);
-		rightSphereRitem->TexTransform = Identity4x4();
-		rightSphereRitem->ObjCBIndex = objCBIndex++;
-		rightSphereRitem->TextureIndex = 1; // stone - вторая загруженная текстура
-		rightSphereRitem->Geo = m_primitiveAtlas.get();
-		rightSphereRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		if (sphereRegion) {
-			rightSphereRitem->IndexCount = sphereRegion->IndexCount;
-			rightSphereRitem->StartIndexLocation = sphereRegion->StartIndexLocation;
-			rightSphereRitem->BaseVertexLocation = sphereRegion->BaseVertexLocation;
-		}
-		m_allRitems.push_back(std::move(rightSphereRitem));
-	}
+        // Right cylinder with stone texture
+        AddRenderItemObject(m_primitiveAtlas.get(),
+                           DirectX::XMMatrixTranslation(+5.0f, 1.5f, -10.0f + i*5.0f),
+                           brickTexTransform,
+                           objCBIndex++, 1, cylinderKey);
 
-	// All render items divided by PSO.
-	for(auto& e : m_allRitems) {
-		// For now all items use the same PSO
-	}
+        // Left sphere with stone texture
+        AddRenderItemObject(m_primitiveAtlas.get(),
+                           DirectX::XMMatrixTranslation(-5.0f, 3.5f, -10.0f + i*5.0f),
+                           identityTexTransform,
+                           objCBIndex++, 1, sphereKey);
+
+        // Right sphere with stone texture
+        AddRenderItemObject(m_primitiveAtlas.get(),
+                           DirectX::XMMatrixTranslation(+5.0f, 3.5f, -10.0f + i*5.0f),
+                           identityTexTransform,
+                           objCBIndex++, 1, sphereKey);
+    }
+
+    // All render items divided by PSO.
+    for(auto& e : m_allRitems) {
+        // For now all items use the same PSO
+    }
 }
 
 void ResourceManager::BuildRootSignature() {

@@ -12,12 +12,17 @@ ResourceManager::ResourceManager(ID3D12Device* device, ID3D12GraphicsCommandList
 
 void ResourceManager::AddRenderItemObject(GeometryAltas* atlas, DirectX::XMMATRIX worldTransform,
     DirectX::XMMATRIX texTransform, UINT objCBidx, int texIdx, String& meshRegionKey) {
-	auto ri = std::make_unique<RenderItem>();
+    
+    static int counter = 0;
+    
+    auto ri = std::make_unique<RenderItem>();
+    ri->index = counter++;
 	DirectX::XMStoreFloat4x4(&ri->World, worldTransform);
 	DirectX::XMStoreFloat4x4(&ri->TexTransform, texTransform);
 	ri->ObjCBIndex = objCBidx;
 	ri->TextureIndex = texIdx;
 	ri->Geo = atlas;
+	ri->Bounds = GetMeshRegion(meshRegionKey)->Bounds;
 	ri->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 	const auto* meshRegion = GetMeshRegion(meshRegionKey);
 	if (meshRegion) {
@@ -25,6 +30,7 @@ void ResourceManager::AddRenderItemObject(GeometryAltas* atlas, DirectX::XMMATRI
 		ri->StartIndexLocation = meshRegion->StartIndexLocation;
 		ri->BaseVertexLocation = meshRegion->BaseVertexLocation;
 	}
+
 	m_allRitems.push_back(std::move(ri));
 }
 

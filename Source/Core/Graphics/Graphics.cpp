@@ -759,6 +759,9 @@ void Graphics::PickObject(int32 x, int32 y) {
 
 	auto& renderItems = m_resourceManager->GetAllRenderItems();
 
+	float closestT = FLT_MAX;
+	int selectedIndex = -1;
+
 	for(const auto& ri : renderItems) {
 		auto geo = ri->Geo;
 
@@ -772,9 +775,13 @@ void Graphics::PickObject(int32 x, int32 y) {
 
 		float tmin = 0.0f;
 		if(ri->Bounds.Intersects(localOrigin, localDir, tmin)) {
-			m_selectedObjectIndex = ri->index;
+			if (tmin < closestT) {
+				closestT = tmin;
+				selectedIndex = ri->index;
+			}
 		}
 	}
+	m_selectedObjectIndex = selectedIndex;
 }
 
 void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {

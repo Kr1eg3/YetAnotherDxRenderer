@@ -206,7 +206,6 @@ void Graphics::CreateDevice() {
 		if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
 			continue;
 		}
-
 		// Try to create device with this adapter
 		if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device)))) {
 			Platform::OutputDebugMessage("D3D12 device created successfully\n");
@@ -756,12 +755,28 @@ void Graphics::PickObject(int32 x, int32 y) {
 	DirectX::XMMATRIX V = DirectX::XMLoadFloat4x4(&mView);
 	DirectX::XMVECTOR det = DirectX::XMMatrixDeterminant(V);
 	DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(&det, V);
+	
+	//float closestT = FLT_MAX;
+	//int selectedIndex = -1;
 
 	auto& renderItems = m_resourceManager->GetAllRenderItems();
 
-	float closestT = FLT_MAX;
-	int selectedIndex = -1;
+	auto pickItem = std::ranges::find_if(renderItems, 
+		[&](const auto& ri) {
+		DirectX::XMMATRIX W = XMLoadFloat4x4(&ri->World);
+		DirectX::XMMATRIX invWorld = XMMatrixInverse(&det, W);
 
+		DirectX::XMMATRIX toLocal = XMMatrixMultiply(invView, invWorld);
+		DirectX::XMVECTOR localOrigin = DirectX::XMVector3TransformCoord(rayOrigin, toLocal);
+		DirectX::XMVECTOR localDir = DirectX::XMVector3TransformNormal(rayDir, toLocal);
+		localDir = DirectX::XMVector3Normalize(localDir);
+
+		float tmin = 0.0f;
+		return ri->Bounds.Intersects(localOrigin, localDir, tmin);
+		});
+
+	m_selectedObjectIndex = (pickItem != renderItems.end()) ? (*pickItem)->index : -1;
+#if 0
 	for(const auto& ri : renderItems) {
 		auto geo = ri->Geo;
 
@@ -782,6 +797,7 @@ void Graphics::PickObject(int32 x, int32 y) {
 		}
 	}
 	m_selectedObjectIndex = selectedIndex;
+#endif
 }
 
 void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems) {

@@ -81,6 +81,32 @@ Graphics::Graphics(Window* wnd)
 
     // Wait until initialization is complete.
     FlushCommandQueue();
+
+	m_graphics2D = UniquePtr<Graphics2D>(new Graphics2D());
+	if (!m_graphics2D->Initialize(
+		m_device.Get(),
+		m_commandQueue.Get(),
+		m_swapChain.Get(),
+		m_swapChainBufferCount,
+		m_backBufferFormat)) {
+		Platform::OutputDebugMessage("Warning: Failed to initialize Graphics2D\n");
+		m_graphics2D.reset();
+	}
+
+	// Create window-size dependent 2D resources
+	if (m_graphics2D) {
+		ID3D12Resource* backBuffers[2] = {
+			m_swapChainBuffer[0].Get(),
+			m_swapChainBuffer[1].Get()
+		};
+		m_graphics2D->OnResize(
+			m_window->GetWidth(),
+			m_window->GetHeight(),
+			backBuffers,
+			m_swapChainBufferCount
+		);
+	}
+
 }
 
 void Graphics::BuildShadersAndInputLayout() {
@@ -379,6 +405,16 @@ void Graphics::DrawFrame() {
 	ID3D12CommandList* cmdsLists[] = { m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
+	// 2D Rendering (D3D11on12)
+	if (m_graphics2D) {
+		m_graphics2D->BeginDraw(m_currBackBuffer);
+
+		// Рисуем 2D контент
+		Draw2DContent();
+
+		m_graphics2D->EndDraw(m_currBackBuffer);
+	}
+
 	// swap the back and front buffers
 	ThrowIfFailed(m_swapChain->Present(0, 0));
 	m_currBackBuffer = (m_currBackBuffer + 1) % m_swapChainBufferCount;
@@ -399,6 +435,20 @@ void Graphics::OnResize() {
 
 	// Flush before changing any resources.
 	FlushCommandQueue();
+
+	// Recreate 2D resources
+	if (m_graphics2D) {
+		ID3D12Resource* backBuffers[2] = {
+			m_swapChainBuffer[0].Get(),
+			m_swapChainBuffer[1].Get()
+		};
+		m_graphics2D->OnResize(
+			m_window->GetWidth(),
+			m_window->GetHeight(),
+			backBuffers,
+			m_swapChainBufferCount
+		);
+	}
 
 	ThrowIfFailed(m_commandList->Reset(m_directCmdListAlloc.Get(), nullptr));
 
@@ -844,4 +894,14 @@ void Graphics::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<
 
         itemIndex++;
 	}
+}
+
+void Graphics::Draw2DContent() {
+	// Рамка
+	m_graphics2D->DrawRectangle(0, 0, 250, 120,
+		D2D1::ColorF(D2D1::ColorF::White), 1.0f);
+
+	// Текстовая информация
+	m_graphics2D->DrawText(L"m_currBackBuffer", 10, 10, 200, 25,
+		D2D1::ColorF(D2D1::ColorF::White), 16.0f);
 }

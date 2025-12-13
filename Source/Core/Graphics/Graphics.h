@@ -6,6 +6,7 @@
 #include <ResourceManager.h>
 #include <StaticMesh.h>
 #include <FrameResource.h>
+#include "Graphics2D.h"
 
 
 class Graphics {
@@ -52,8 +53,11 @@ private:
     void BuildShadersAndInputLayout();
 	void BuildFrameResources();
     void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const Vector<UniquePtr<RenderItem>>& ritems);
-
+    void Draw2DContent();
     std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
+
+    // Доступ к 2D подсистеме
+    Graphics2D* Get2D() { return m_graphics2D.get(); }
 
 private:
 	Window* m_window = nullptr;
@@ -80,6 +84,9 @@ private:
     ComPtr<ID3D12Device> m_device;
     ComPtr<IDXGISwapChain> m_swapChain;
     ComPtr<IDXGIFactory4> m_dxgiFactory;
+
+    // 2D Graphics subsystem
+    UniquePtr<Graphics2D> m_graphics2D;
 
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<ID3D12CommandAllocator> m_directCmdListAlloc;  // For initialization and resize

@@ -137,6 +137,7 @@
     <ClCompile Include="Source\Core\Application\Application.cpp" />
     <ClCompile Include="Source\Core\Application\Timer.cpp" />
     <ClCompile Include="Source\Core\Graphics\Graphics.cpp" />
+    <ClCompile Include="Source\Core\Graphics\Graphics2D.cpp" />
     <ClCompile Include="Source\Platform\Windows\Win32Window.cpp" />
     <ClCompile Include="WinMain.cpp" />
   </ItemGroup>
@@ -145,6 +146,7 @@
     <ClInclude Include="Source\Core\Application\Application.h" />
     <ClInclude Include="Source\Core\Application\Timer.h" />
     <ClInclude Include="Source\Core\Graphics\Graphics.h" />
+    <ClInclude Include="Source\Core\Graphics\Graphics2D.h" />
     <ClInclude Include="Source\Core\Window\Window.h" />
     <ClInclude Include="Source\Platform\Windows\Win32Window.h" />
     <ClInclude Include="Types.h" />

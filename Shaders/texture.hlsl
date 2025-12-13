@@ -63,10 +63,40 @@ VertexOut VS(VertexIn vin)
     return vout;
 }
 
+#define PIXEL_SIZE 1.0f
+#define N_COLORS 3.0f
+
+static const float Bayer4x4[16] =
+{
+    0, 8, 2, 10,
+    12, 4, 14, 6,
+     3, 11, 1, 9,
+    15, 7, 13, 5
+};
+
 float4 PS(VertexOut pin) : SV_Target
 {
-    // Sample the texture
+    float2 snapped_tex_coords = pin.TexC * gRenderTargetSize;
+    snapped_tex_coords = floor(snapped_tex_coords / PIXEL_SIZE) * PIXEL_SIZE;
+    snapped_tex_coords = snapped_tex_coords * gInvRenderTargetSize;
+    
     float4 diffuseAlbedo = gDiffuseMap.Sample(gsamAnisotropicWrap, pin.TexC);
 
-    return diffuseAlbedo;
+    float c = saturate(dot(diffuseAlbedo.rgb, float3(0.299, 0.587, 0.114)));
+
+    int block_x_index = (int) floor(pin.PosH.x / PIXEL_SIZE);
+    int block_y_index = (int) floor(pin.PosH.y / PIXEL_SIZE);
+    
+    int x = block_x_index % 4;
+    int y = block_y_index % 4;
+
+    float M_norm = Bayer4x4[y * 4 + x] / 16.0;
+
+    float n_minus_1 = N_COLORS - 1.0;
+    float adjusted_c = c * n_minus_1 + M_norm;
+    int index = (int) floor(adjusted_c);
+    float quantized_c = (float) index;
+    float3 finalColor = diffuseAlbedo.rgb * quantized_c;
+
+    return float4(finalColor, diffuseAlbedo.a);
 }

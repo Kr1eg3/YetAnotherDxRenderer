@@ -17,10 +17,21 @@
 #include <DirectXCollision.h>
 #include <DDSTextureLoader.h>
 
+// Direct2D and DirectWrite includes
+#include <d2d1_3.h>
+#include <d2d1_3helper.h>
+#include <dwrite_3.h>
+#include <d3d11on12.h>
+
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "dxgi.lib")
+
+// Link necessary Direct2D and DirectWrite libraries
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "d3d11.lib")
 
 // ComPtr
 #include <wrl/client.h>
